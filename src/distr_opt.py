@@ -22,14 +22,19 @@ spec.loader.exec_module(header)
 
 # Init global variables for callbacks
 t_est_x, t_est_y, s_state_x, s_state_y = [], [], [], []
+t_state = [None, None, None, None]
+s_state = [None, None, None]
+policies_intent = [None, None, None, None]
 
 # Global Variables
 DELTA = 10**15
 cubicSpline = header.planner
 DT = 15#auvNum*header.config.Td #should be equal more or less to the expected time to perform an estimation
 desired_vel = header.config.AUV_VEL
-
-
+policy_intent1 = None
+policy_intent2 = policy_intent1
+policy_intent3 = policy_intent2
+policy_intent4 = policy_intent3
 
 def update_path(ax, ay, waypoint, s_pose, desired_vel):
         
@@ -213,8 +218,6 @@ def simulation(control_input, target_est, s_pose, sensors, controller, ax, ay, d
 
     return target.x, estimator.phi, estimator.y, s_pose, ax[-1], ay[-1], d
 
-
-
 def compute_cost(phi,length_y):
     tmp_phi = np.zeros((length_y,2))
     for i in range(length_y):
@@ -230,27 +233,47 @@ def shutdown_cllbk():
     none = "\033[0m"
     rospy.loginfo('%s|---- OPTIMIZATION '+str(auvID)+': Simulation data saved --> Shutting down ...%s',magenta,none)
 
-def callback1(data):
-    global ctrl_policy
+def callbackTstate(data):
+    global t_state
     tmp = data.data
+    t_state = tmp
+
+def callbackSstate(data):
+    global s_state
+    tmp = data.data
+    s_state = tmp
+    
+def callback1(data):
+    global policies_intent
+    tmp = data.data
+    policies_intent[0] = tmp
 
 def callback2(data):
-    global ctrl_policy
+    global policies_intent
     tmp = data.data
-    
-def callback3(data):
-    global ctrl_policy
-    tmp = data.data
-    
-def listener(auvID):
-   
-    rospy.Subscriber('/'+str(auvID)+'/estimation', numpy_msg(Floats), callback1)
-    rospy.Subscriber('vehicle_state_'+str(auvID), numpy_msg(Floats), callback2)
-    rospy.Subscriber('/'+str(auvID)+'/rx_ctrl_policy', numpy_msg(Floats), callback3)
+    policies_intent[1] = tmp
 
+def callback3(data):
+    global policies_intent
+    tmp = data.data
+    policies_intent[2] = tmp
+
+def callback4(data):
+    global policies_intent
+    tmp = data.data
+    policies_intent[3] = tmp
+
+def listener(auvID,auvNum):
+   
+    rospy.Subscriber('/'+str(auvID)+'/estimation', numpy_msg(Floats), callbackTstate)
+    rospy.Subscriber('vehicle_state_'+str(auvID), numpy_msg(Floats), callbackSstate)
+    callback_list = [callback1, callback2, callback3, callback4]
+    for i in range(auvNum):
+        if i+1 != auvID:
+            rospy.Subscriber('/'+str(i+1)+'/rx_ctrl_policy', numpy_msg(Floats), callback_list[i])
 
 def main():
-
+    global policies_intent, s_state, t_state
     # ROS INIT   
     namespace = rospy.get_namespace()
     params_path = namespace+'auv'
@@ -272,17 +295,30 @@ def main():
     # Init time variables and counters and lists
     t, count1 = 0,0
     dt = header.config.TIME_STEP*t_scaler
-
+    old_t_state = [None, None, None, None]
     # Init publishers and subscribers
     pub_ctrl_policy = rospy.Publisher('/'+str(auvID)+'/ctrl_policy',numpy_msg(Floats),queue_size=100)
-    listener(auvID)
+    listener(auvID,auvNum)
     rospy.sleep(1)
+    
     while not rospy.is_shutdown():
-        
+
+
+        if t_state[0] != old_t_state[0] and t_state[0] != None:
+            for i in range(len(policies_intent)):
+                tmp = policies_intent[i]
+                
+                #if tmp[0] != None:
+                rospy.loginfo('OPTIMIZATION of AUV ID %s - Policy of intent of AUV %s: %s', auvID, i+1, policies_intent[i])
+             
+            ######## DO OPTIMIZATION HERE ! ########
+            output_policy = np.zeros((header.config.H,1))
+            pub_ctrl_policy.publish(output_policy)
 
         if int(t) == (header.config.TIME_DURATION-1):
             rospy.on_shutdown(shutdown_cllbk)
             rospy.signal_shutdown('Simulation time limit reached')
+        old_t_state = t_state
         t += dt
         count1 += 1
         rate.sleep()
