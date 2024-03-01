@@ -11,8 +11,6 @@ from rospy.numpy_msg import numpy_msg
 # IMPORT SOLVER LIBRARY
 import pybnb #THIS MAY CHANGE ACCORDING TO THE APPLICATION
 
-
-
 # Load the header file as a Python module 
 pkg_directory = os.path.dirname(os.path.dirname(pathlib.Path(__file__).parent.resolve()))
 header_file = pkg_directory+'/uwmsn-motion_opt'+'/include'+'/uwmsn-motion_opt'
@@ -28,8 +26,10 @@ t_est_x, t_est_y, s_state_x, s_state_y = [], [], [], []
 # Global Variables
 DELTA = 10**15
 cubicSpline = header.planner
-DT = header.config.OPTIMIZATION_TIME_STEP #should be equal more or less to the expected time to perform an estimation
+DT = 15#auvNum*header.config.Td #should be equal more or less to the expected time to perform an estimation
 desired_vel = header.config.AUV_VEL
+
+
 
 def update_path(ax, ay, waypoint, s_pose, desired_vel):
         
@@ -213,6 +213,8 @@ def simulation(control_input, target_est, s_pose, sensors, controller, ax, ay, d
 
     return target.x, estimator.phi, estimator.y, s_pose, ax[-1], ay[-1], d
 
+
+
 def compute_cost(phi,length_y):
     tmp_phi = np.zeros((length_y,2))
     for i in range(length_y):
@@ -222,151 +224,76 @@ def compute_cost(phi,length_y):
     cost2 = np.linalg.norm(np.linalg.inv(PHI),ord=2)*np.linalg.norm(PHI,ord=2)
     return cost2
 
+def shutdown_cllbk():
+    global auvID
+    magenta = "\033[0;35m"
+    none = "\033[0m"
+    rospy.loginfo('%s|---- OPTIMIZATION '+str(auvID)+': Simulation data saved --> Shutting down ...%s',magenta,none)
+
+def callback1(data):
+    global ctrl_policy
+    tmp = data.data
+
+def callback2(data):
+    global ctrl_policy
+    tmp = data.data
+    
+def callback3(data):
+    global ctrl_policy
+    tmp = data.data
+    
+def listener(auvID):
+   
+    rospy.Subscriber('/'+str(auvID)+'/estimation', numpy_msg(Floats), callback1)
+    rospy.Subscriber('vehicle_state_'+str(auvID), numpy_msg(Floats), callback2)
+    rospy.Subscriber('/'+str(auvID)+'/rx_ctrl_policy', numpy_msg(Floats), callback3)
+
+
 def main():
 
-    # Ros Initialization
-    rospy.init_node('optimization')
-    pub = rospy.Publisher("ctrl_cmd",numpy_msg(Floats),queue_size=100)
-    Hz = 1/(header.config.TIME_STEP)
+    # ROS INIT   
+    namespace = rospy.get_namespace()
+    params_path = namespace+'auv'
+
+    # Get AUV ID and number of vehicles.
+    global auvID, auvNum
+    auvID = rospy.get_param(params_path+'/auvID')
+    auvNum = rospy.get_param(params_path+'/auvNum')
+
+    # Node Init
+    rospy.init_node('auv'+str(auvID)) #TO ADD debug prints --> log_level=rospy.DEBUG
+
+    # ROS simulation parameters
+    t_scaler = header.config.TIME_SCALER
+
+    Hz = 1/(header.config.TIME_STEP) #NB: different from sampling rate for move things, this is ros rate   
     rate = rospy.Rate(Hz)
 
-    # Init lists for log files.
-    ctrl_opt, ctrl_plot, sensors, old_ctrls = [], [], [], []  
-    avg_time, avg_nodes = [],[]
+    # Init time variables and counters and lists
+    t, count1 = 0,0
+    dt = header.config.TIME_STEP*t_scaler
 
-    # Init Parameters for U setup
-    count_low, count_max = 0,0
-    ctrl_cmd = header.config.ctrl_cmd
-
-
-    u_max = header.config.u_max
-    delta_u = header.config.delta_u
-    limit = 0.0
-    for i in range(header.config.M+1):
-        limit += header.config.U**i
-
-    # Initialize sensors class (Reproduce the AVS)
-    geometry = header.config.geometry
-    for i in range(header.config.N_AUV): 
-        sensors.append(header.sensors.Sensor(str(i),1,0,0.000))#header.config.SIGMA_MEAS
-    
-    if header.config.OPTIMIZATION_ON == True:
-        rospy.loginfo('STARTED OPTIMIZATION')
-    
+    # Init publishers and subscribers
+    pub_ctrl_policy = rospy.Publisher('/'+str(auvID)+'/ctrl_policy',numpy_msg(Floats),queue_size=100)
+    listener(auvID)
+    rospy.sleep(1)
     while not rospy.is_shutdown():
-
-        # Retrieve information from estimation module (propagate estimation) and planning module (update the path)
-        t_est = rospy.wait_for_message('/estimation',numpy_msg(Floats))
-        s_state = rospy.wait_for_message('/platform_state',numpy_msg(Floats))
-        ax = rospy.wait_for_message('/ax',numpy_msg(Floats))
-        ay = rospy.wait_for_message('/ay',numpy_msg(Floats))
-        cov = rospy.wait_for_message('/cov',numpy_msg(Floats))
-        t_est = t_est.data
-        s_ = s_state.data
         
-        # Data conversion
-        s_state = [s_[0], s_[1], s_[2]]
-        v_n = s_[3]
-        ax_array = ax.data
-        ay_array = ay.data
-        cov = cov.data
-        
-        # Load the last section of followed path
-        ax, ay = [], []
-        if geometry == 'column' or geometry == 'column2': # THIS CAN BECAME A FUNCTION
-            for i in range(len(ay_array)):
-                #length = len(ay_array)-n
-                ax.append(ax_array[i])#ax.append(ax_array[length+])
-                ay.append(ay_array[i])
-            path = cubicSpline.CubicSpline2D(ax, ay)
-            d = path.s[-1]-1
 
-        elif geometry == 'line' or geometry == 'line2':
-            for i in range(len(ay_array)):
-                
-                ax.append(ax_array[i])
-                ay.append(ay_array[i])
-            path = cubicSpline.CubicSpline2D(ax, ay)
-            d = path.s[-1]-1
-
-        # Initialize Cooperative Path Following Class 
-        cpf_control = 0
-        n = len(t_est)
-        P = np.zeros((n,n))
-        for i in range(n):
-            P[i,:] = cov[(i*n):(i*n)+n]
-
-        ######## Compute the best solution solving the optimization with BnB or Greedy search #####
-  
-        problem = Simple(t_est, s_state, sensors, cpf_control, ctrl_cmd, ax, ay, d, P, v_n)
-        solver = pybnb.Solver()
-        ''' TEST ON BnB problem_simplified = Simple(t_est, s_state, DELTA, sensors, cpf_control, ctrl_cmd, P)
-        results_preview = solver.solve(problem,queue_strategy="objective",node_limit=limit)
-        lower_bound = results_preview.objective'''
-        results = solver.solve(problem,queue_strategy="bound" ,node_limit=limit)#tnode_limit=limi #Uniform cost search con "objective"
-        best_node_states = results.best_node.state #objective_stop=90000,time_limit=5
-        wall_time = results.wall_time
-        nodes = results.nodes
-        avg_nodes.append(nodes)
-        avg_time.append(wall_time)
-        ctrl_opt = best_node_states[4]
-
-        ###########################################################################################
-        time.sleep(10/Hz)
-        pub.publish(np.array(ctrl_opt,dtype=np.float32))
-        ctrl_plot.append(ctrl_opt[0])
-        old_ctrls.append(ctrl_opt[0])
-        
-        # Adapt online the heading changes: # TO DEBUG !!!!! OR TO TUNE PROPERLY -  in theory done to check
-        if len(old_ctrls) == 3:
-            for i in range(len(old_ctrls)):
-                if [0-(1e-3)] <=  np.abs(old_ctrls[i])-(1e-3) <= header.config.u_max *2/(header.config.U):
-                    count_low += 1 
-                    if count_low == 3:
-                        if u_max <= header.config.MIN:
-                            u_max = u_max
-                            count_low = 0
-                        else:
-                            print('DECREASING K_MAX----------------------------')
-                            u_max  = u_max  - delta_u
-                            count_low = 0
-                elif np.abs(old_ctrls[i]) >= u_max :
-                    count_max += 1
-                    if count_max == 3:
-                        if u_max >= header.config.MAX:
-                            u_max = u_max
-                            count_max = 0
-                        else:
-                            print('INCREASING K_MAX++++++++++++++++++++++++++++')
-                            u_max  = u_max  + delta_u
-                            count_max = 0
-            count_low = 0
-            count_max = 0
-            old_ctrls = []
-            if header.config.U == 5: 
-                ctrl_cmd = [-u_max, -u_max*4/(header.config.U),0,u_max*4/(header.config.U),u_max]
-            elif header.config.U == 7:
-                ctrl_cmd = [-u_max, -u_max*4/(header.config.U),-u_max*2/(header.config.U),0,u_max*2/(header.config.U),u_max*4/(header.config.U),u_max]
-            else:
-                ctrl_cmd = [-u_max,0,u_max]
-            print('COUNT LOW-------------------------------',count_low)
-            print('COUNT MAX+++++++++++++++++++++++++++++++',count_max)
-
-        #SAVE DATA FOR PLOT
-        np.savetxt(log_path+'/wall_times.txt',avg_time)
-        np.savetxt(log_path+'/nodes.txt',avg_nodes)
-
-        ctrl_opt = []
+        if int(t) == (header.config.TIME_DURATION-1):
+            rospy.on_shutdown(shutdown_cllbk)
+            rospy.signal_shutdown('Simulation time limit reached')
+        t += dt
+        count1 += 1
         rate.sleep()
-    
+
+    rospy.on_shutdown(shutdown_cllbk)
+    rospy.spin()
 if __name__ == '__main__':
     
     main()
 
 
-
-'''np.savetxt(log_path+'/plot_cmds.txt',ctrl_plot)
-np.savetxt(log_path+'/t_est_x_opt.txt',t_est_x[0])
-np.savetxt(log_path+'/t_est_y_opt.txt',t_est_y[0])
-np.savetxt(log_path+'/s_state_x.txt',s_state_x)
-np.savetxt(log_path+'/s_state_y.txt',s_state_y)'''
+''' TEST ON BnB problem_simplified = Simple(t_est, s_state, DELTA, sensors, cpf_control, ctrl_cmd, P)
+        results_preview = solver.solve(problem,queue_strategy="objective",node_limit=limit)
+        lower_bound = results_preview.objective'''
