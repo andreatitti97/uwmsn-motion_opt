@@ -228,7 +228,10 @@ def compute_cost(phi,length_y):
     return cost2
 
 def shutdown_cllbk():
-    global auvID
+    global auvID, avg_time, avg_nodes
+    np.savetxt(log_path+'/wall_times'+str(auvID)+'.txt',avg_time)
+    np.savetxt(log_path+'/nodes'+str(auvID)+'.txt',avg_nodes)
+    
     magenta = "\033[0;35m"
     none = "\033[0m"
     rospy.loginfo('%s|---- OPTIMIZATION '+str(auvID)+': Simulation data saved --> Shutting down ...%s',magenta,none)
@@ -279,7 +282,7 @@ def main():
     params_path = namespace+'auv'
 
     # Get AUV ID and number of vehicles.
-    global auvID, auvNum
+    global auvID, auvNum, avg_nodes, avg_time
     auvID = rospy.get_param(params_path+'/auvID')
     auvNum = rospy.get_param(params_path+'/auvNum')
 
@@ -294,12 +297,23 @@ def main():
 
     # Init time variables and counters and lists
     t, count1 = 0,0
+    avg_time, avg_nodes = [],[]
     dt = header.config.TIME_STEP*t_scaler
     old_t_state = [None, None, None, None]
-    # Init publishers and subscribers
+    # Init publishers and subscribers and sensor objects
+    sensors = []
+    for i in range(auvNum):
+        sensors.append(header.sensor.Sensor(str(i),1,0,0.000))
+
     pub_ctrl_policy = rospy.Publisher('/'+str(auvID)+'/ctrl_policy',numpy_msg(Floats),queue_size=100)
+    # Compute nodes limit according to RHC with finite memory
+    limit = 0.0
+    for i in range(header.config.H+1):
+            limit += header.config.U**i
+
     listener(auvID,auvNum)
     rospy.sleep(1)
+
     
     while not rospy.is_shutdown():
 
@@ -312,6 +326,15 @@ def main():
                 rospy.loginfo('OPTIMIZATION of AUV ID %s - Policy of intent of AUV %s: %s', auvID, i+1, policies_intent[i])
              
             ######## DO OPTIMIZATION HERE ! ########
+            '''problem = Simple(t_state, s_state, policies_intent,sensors)
+            solver = pybnb.Solver()
+            results = solver.solve(problem,queue_strategy="bound" ,node_limit=limit)#tnode_limit=limi #Uniform cost search con "objective"
+            best_node_states = results.best_node.state #objective_stop=90000,time_limit=5
+            wall_time = results.wall_time
+            nodes = results.nodes
+            avg_nodes.append(nodes)
+            avg_time.append(wall_time)
+            output_policy = best_node_states[4]'''
             output_policy = np.zeros((header.config.H,1))
             pub_ctrl_policy.publish(output_policy)
 
