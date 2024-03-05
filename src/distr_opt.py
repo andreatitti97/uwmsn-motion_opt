@@ -31,10 +31,6 @@ DELTA = 10**15
 cubicSpline = header.planner
 DT = 15#auvNum*header.config.Td #should be equal more or less to the expected time to perform an estimation
 desired_vel = header.config.AUV_VEL
-policy_intent1 = None
-policy_intent2 = policy_intent1
-policy_intent3 = policy_intent2
-policy_intent4 = policy_intent3
 
 def update_path(ax, ay, waypoint, s_pose, desired_vel):
         
@@ -164,45 +160,20 @@ class Simple(pybnb.Problem):
             ay.pop(-1)
             yield child
 
-def simulation(control_input, target_est, s_pose, sensors, controller, ax, ay, d,v_n,P):
+def simulation(control_input, s_pose, target_est, P, sensors, d, v_n):
     
     # Temporal Variable
     j = 0, 0 #time and counter init
     meas_table = []
 
-    dt = header.config.OPTIMIZATION_TIME_STEP
+    dt = DT
     # Init classes for tracker and target
     target = Target(target_est, dt, P)
     estimator = Estimation()
 
-     # Load Path
-    path = cubicSpline.CubicSpline2D(ax, ay)#re-generate the path followed up to now
-    [rx, ry, ryaw, rk, s]=header.utils.calc_spline_course(path,dt)
-
-    # Load Path
-
-    path, d, ax, ay, current_theta = update_path(ax,ay,control_input,s_pose, v_n)
-
-    s_pose = [rx[-1],ry[-1],ryaw[-1]]
-
     # Compute FINAL agents pose
-    geometry = header.config.geometry
-    f = header.config.formation
     auvs_xy = np.zeros((header.config.N_AUV,2))
     auvs_theta = np.zeros(header.config.N_AUV)
-
-    for i in range(header.config.N_AUV):
-
-        if geometry == 'line' or geometry == 'line2':
-            auvs_theta[i] = s_pose[2]
-            auvs_xy[i,0] = s_pose[0] + (f[i,0]*np.cos(s_pose[2])+f[i,1]*np.sin(s_pose[2]))
-            auvs_xy[i,1] = s_pose[1] - (-f[i,0]*np.sin(s_pose[2])+f[i,1]*np.cos(s_pose[2]))      
-        if geometry == 'column' or geometry == 'column2':      
-            
-            x,y = path.calc_position(-f[i]+d)
-            auvs_xy[i,0] = x
-            auvs_xy[i,1] = y
-            auvs_theta[i] = path.calc_yaw(-f[i]+d)
 
     # Propagate target state estimation
     tmp = np.zeros((4,1))
@@ -216,7 +187,7 @@ def simulation(control_input, target_est, s_pose, sensors, controller, ax, ay, d
         meas_table.append(arr)
     estimator.computeState(meas_table)
 
-    return target.x, estimator.phi, estimator.y, s_pose, ax[-1], ay[-1], d
+    return target.x, estimator.phi, estimator.y, s_pose, d
 
 def compute_cost(phi,length_y):
     tmp_phi = np.zeros((length_y,2))
@@ -319,11 +290,11 @@ def main():
 
 
         if t_state[0] != old_t_state[0] and t_state[0] != None:
+            
             for i in range(len(policies_intent)):
                 tmp = policies_intent[i]
-                
                 #if tmp[0] != None:
-                rospy.loginfo('OPTIMIZATION of AUV ID %s - Policy of intent of AUV %s: %s', auvID, i+1, policies_intent[i])
+                #rospy.loginfo('OPTIMIZATION of AUV ID %s - Policy of intent of AUV %s: %s', auvID, i+1, policies_intent[i])
              
             ######## DO OPTIMIZATION HERE ! ########
             '''problem = Simple(t_state, s_state, policies_intent,sensors)
@@ -335,7 +306,13 @@ def main():
             avg_nodes.append(nodes)
             avg_time.append(wall_time)
             output_policy = best_node_states[4]'''
-            output_policy = np.zeros((header.config.H,1))
+            msg = [s_state[0],s_state[1],s_state[2]]
+
+            for i in range(header.config.H):
+                msg.append(0)#appendi la sequenza ottimale di controllo
+            
+            output_policy = np.array(msg,dtype=np.float32)
+            
             pub_ctrl_policy.publish(output_policy)
 
         if int(t) == (header.config.TIME_DURATION-1):
