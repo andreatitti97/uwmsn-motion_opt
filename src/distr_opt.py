@@ -27,7 +27,7 @@ s_state = [None, None, None]
 policies_intent = [None, None, None, None]
 
 # Global Variables
-DELTA = 10**15
+
 cubicSpline = header.planner
 DT = 15#auvNum*header.config.Td #should be equal more or less to the expected time to perform an estimation
 desired_vel = header.config.AUV_VEL
@@ -52,6 +52,15 @@ def update_path(ax, ay, waypoint, s_pose, desired_vel):
         path = cubicSpline.CubicSpline2D(ax, ay)
 
         return path, d_real, ax, ay, t_f
+
+def compute_cost(phi,length_y):
+    tmp_phi = np.zeros((length_y,2))
+    for i in range(length_y):
+        a = phi[i]
+        tmp_phi[i,:] = [a[0],a[1]]
+    PHI = np.dot(np.transpose(tmp_phi),tmp_phi)
+    cost2 = np.linalg.norm(np.linalg.inv(PHI),ord=2)*np.linalg.norm(PHI,ord=2)
+    return cost2
 
 class Target():
     def __init__(self, init_state, dt, P=[]):
@@ -91,8 +100,8 @@ class Simple(pybnb.Problem):
     def __init__(self,x_hat, s,sensors, cpf_control, ctrl_cmds, ax, ay, d,cov,v_n):
         
         inf = float("inf")
-        self.value = DELTA  
-        self.initial_cost = DELTA
+        self.value = header.config.DELTA
+        self.initial_cost = header.config.DELTA
         self._bound = -inf # initial_cost-100 #lower bound 
         self.choices = []
         self._x_hat = x_hat
@@ -188,15 +197,6 @@ def simulation(control_input, s_pose, target_est, P, sensors, d, v_n):
     estimator.computeState(meas_table)
 
     return target.x, estimator.phi, estimator.y, s_pose, d
-
-def compute_cost(phi,length_y):
-    tmp_phi = np.zeros((length_y,2))
-    for i in range(length_y):
-        a = phi[i]
-        tmp_phi[i,:] = [a[0],a[1]]
-    PHI = np.dot(np.transpose(tmp_phi),tmp_phi)
-    cost2 = np.linalg.norm(np.linalg.inv(PHI),ord=2)*np.linalg.norm(PHI,ord=2)
-    return cost2
 
 def shutdown_cllbk():
     global auvID, avg_time, avg_nodes
