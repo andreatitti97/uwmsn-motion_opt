@@ -24,7 +24,14 @@ spec.loader.exec_module(header)
 t_est_x, t_est_y, s_state_x, s_state_y = [], [], [], []
 t_state = [None, None, None, None]
 s_state = [None, None, None]
-policies_intent = [[None], [None], [None], [None]]
+policies_intent = [[], [], [], []]
+init_state = None
+
+for i in range(len(policies_intent)):
+    tmp = []
+    for j in range((len(s_state)+header.config.H)):
+        tmp.append(0.0)
+    policies_intent[i] = tmp
 
 # Global Variables
 cubicSpline = header.planner
@@ -35,16 +42,20 @@ def update_path(ax, ay, waypoint, s_pose, desired_vel, DT):
         a_i = [ax[-1],ay[-1]]
         ax.append(np.cos(s_pose[2]+waypoint)*desired_vel*DT+a_i[0])
         ay.append(np.sin(s_pose[2]+waypoint)*desired_vel*DT+a_i[1])
+        
         path = cubicSpline.CubicSpline2D(ax, ay)
 
         return path, ax, ay
 
-def compute_cost(phi,length_y):
+def compute_cost(phi):
+    length_y = len(phi)
     tmp_phi = np.zeros((length_y,2))
     for i in range(length_y):
         a = phi[i]
         tmp_phi[i,:] = [a[0],a[1]]
+    
     PHI = np.dot(np.transpose(tmp_phi),tmp_phi)
+    rospy.loginfo('OPTIMIZATION ID %s --------------------------------REGRESSOR %s',auvID,PHI)
     return np.linalg.norm(np.linalg.inv(PHI),ord=2)*np.linalg.norm(PHI,ord=2)
 
 class Target():
@@ -75,14 +86,15 @@ class Estimation():
             input_meas = table[i]
             self.regressorUpdate(input_meas[0],input_meas[1],input_meas[2])
         # Re-arrange python list into numpy array for matrix moltiplication
-        tmp_y = np.zeros((len(self.y),1))
+        '''tmp_y = np.zeros((len(self.y),1))
         for i in range(len(self.y)):
-            tmp_y[i] = self.y[i]
+            tmp_y[i] = self.y[i]'''
         # Compute State (OPTIONAL, in this case we need only the conditioning to assigne the cost)
-        self.x = np.dot(np.linalg.pinv(self.phi),tmp_y)
+        #self.x = np.dot(np.linalg.pinv(self.phi),tmp_y)
+        #rospy.logwarn('OPTIMIZATION ID %s TARGET ESTIMATION: %s',auvID,self.x)
 
 class Simple(pybnb.Problem):
-    def __init__(self, x_hat, s, ctrl_cmds, pi_bar, v_n = 0, cpf_control = []):
+    def __init__(self, x_hat, s, ctrl_cmds, pi_bar, init_state, v_n = 0, cpf_control = []):
         
         inf = float("inf")
         
@@ -106,6 +118,12 @@ class Simple(pybnb.Problem):
         self.choices = []
         
         # Variables for path init
+        tmp = np.zeros((auvNum,3))
+        for i in range(len(tmp)):
+            for j in range(3):
+                tmp[i,j] = init_state[j+(i*3)]
+
+        self.init_s_state = tmp
         if v_n != 0:
             self.v_n = v_n
         else:
@@ -138,10 +156,11 @@ class Simple(pybnb.Problem):
         ax_ = []
         ay_ = []
         for i in range(len(ax)):
+       
             ax_.append(ax[i])
             ay_.append(ay[i])
         for i in range(header.config.U):
-            x, phi, y, s, tmp_ax, tmp_ay, tmp_pi_bar = simulation(self.ctrl_cmds[i], x_hat, self.P, s, self.sensors, ax, ay, self.v_n, self.DT, pi_bar)
+            x, phi, y, s, tmp_ax, tmp_ay, tmp_pi_bar = simulation(self.ctrl_cmds[i], x_hat, self.P, s, self.sensors, ax, ay, self.v_n, self.DT, pi_bar, self.init_s_state)
             
             # Update the sequence of control decisions
             tmp = [self.ctrl_cmds[i]]
@@ -151,10 +170,11 @@ class Simple(pybnb.Problem):
             if len(choices) == header.config.H:
                 self.value = self.value - self.initial_cost ##THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENCE
                 self._bound = self.value #- cost1 
+                tmp_pi_bar.append(0.0)#TODO: HEURISTIC FUNCTION 
             father_value = self.value #THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENC
             
             # Add the cost of the node to the sequence
-            cost = compute_cost(phi,len(y))
+            cost = compute_cost(phi)
             child_value = father_value + cost
             
             # Branch the tree
@@ -171,7 +191,7 @@ class Simple(pybnb.Problem):
             ay.pop(-1)
             yield child
 
-def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar):
+def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, init_state):
     
     # Temporal Variable
     j = 0, 0 #time and counter init
@@ -182,56 +202,51 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar):
     estimator = Estimation()
 
     # Initialize data structures for agents state
-    auvs_xy = np.zeros((auvNum,3))
-    ref = np.zeros((auvNum,3)) # [rx,ry,ryaw]^j
+    auvs_xy = []
+    ref = [] # [rx,ry,ryaw]^j
+    for i in range(auvNum):
+        auvs_xy.append([])
+        ref.append([])
+        for j in range((len(s_state)+header.config.H)):
+            auvs_xy[i].append(0.0)
+            ref[i].append(0.0)
+    
    
     pi_bar_out = []
     # Compute the path of the j-th neighbours
     j_waypoints = []
-
+    
     for i in range(auvNum):
         
         j_pi_bar = pi_bar[i]
         out = []
-        # TODO ----> ADD INITIALIZATION (how to manage the first optimization without any ctrl_policy)
-        if j_pi_bar[0] != None or i == 0:
-
-            rospy.loginfo('AUV ID %s auv_xy %s j_pi_bar %s pi_bar %s',auvID,auvs_xy,j_pi_bar, pi_bar)
-            auvs_xy[i] = [j_pi_bar[0],j_pi_bar[1],j_pi_bar[2]]
-            j_waypoints = j_pi_bar[3] # to change if more waypoint at this stage
-            ax_j = [auvs_xy[i,0]]
-            ay_j = [auvs_xy[i,1]]
-            if i == 0:
+        if np.sum(j_pi_bar) != 0 or auvID == i+1:
+            if auvID == i+1:
           # Compute the path of the i-th AUV acoording to the choosen command
                 path_j, ax, ay = update_path(ax, ay, ctrl_input, s_pose, v_n, DT)
             else:
+                ax_j,ay_j = [], []
+                auvs_xy[i] = [j_pi_bar[0],j_pi_bar[1],j_pi_bar[2]]
+                j_waypoints = j_pi_bar[3] # to change if more waypoint at this stage
+                ax_j.append(j_pi_bar[0])
+                ay_j.append(j_pi_bar[1])
                 path_j, ax_j, ay_j = update_path(ax_j, ay_j, j_waypoints, auvs_xy[i], v_n, DT)
             [rx_j, ry_j, ryaw_j, rk, s] = header.utils.calc_spline_course(path_j,DT)
-            
-            ref[i] = [rx_j[-1],ry_j[-1],ryaw_j[-1]]
-            auvs_xy[i] = ref[i]
-            
-            j_pi_bar = np.delete(j_pi_bar,3)
-            tmp1 = ref[i]
+            auvs_xy[i] = [rx_j[-1],ry_j[-1],ryaw_j[-1]]
+            if len(j_pi_bar) > 3:
+                j_pi_bar = np.delete(j_pi_bar,3)
+            out = auvs_xy[i]
 
-            for j in range(len(ref[i])):
-                out.append(tmp1[j])
-            for j in range(len(j_pi_bar)):
-                out.append(j_pi_bar)
+            for j in range(len(j_pi_bar[3:len(j_pi_bar)])):
+                out.append(j_pi_bar[j+3])
         else:
-            
+            auvs_xy[i] = [0.0, 0.0, 0.0]
+            if len(j_pi_bar) > 3:
+                j_pi_bar = np.delete(j_pi_bar,3)
             for i in range(len(j_pi_bar)):
-                out.append(None)
+                out.append(0.0)
 
         pi_bar_out.append(out)        
-    # Update agents position according to opt policies
-    for i in range(len(auvs_xy)):
-        tmp = pi_bar_out[i] 
-        if tmp[0] != None:
-
-            auvs_xy[i] = ref[i]
-        else: 
-            auvs_xy[i] = [None, None, None]
 
     # Propagate target state estimation
     tmp = np.zeros((4,1))
@@ -240,14 +255,28 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar):
     target.x = target.F*tmp
    
     # Simulate measurements TODO: (REPRODUCE THE TDMA Sampling!!, not measure everything at the end)
-    for j in range(auvNum):
-        if auvs_xy[i,0] != None:
-            [measure_, rel_bearing_, meas_pos] = sensors[j].measureBearing(target.x[0],target.x[1],[auvs_xy[i,0],auvs_xy[i,1]],auvs_xy[i,2])
+    for i in range(auvNum):
+        tmp = auvs_xy[i]
+        if np.sum(tmp) != 0.0 or auvID == (i+1):
+            
+            [measure_, rel_bearing_, meas_pos] = sensors[i].measureBearing(target.x[0],target.x[1],[tmp[0],tmp[1]],tmp[2])
             arr = [measure_,meas_pos[0],meas_pos[1]]
             meas_table.append(arr)
+            rospy.logwarn('OPTIMIZATION ID %s has CURRENT AUV STATE: %s ---CASE 1 measure %s',auvID,tmp,measure_)
+        else:
+           
+            [measure_, rel_bearing_, meas_pos] = sensors[i].measureBearing(target.x[0],target.x[1],[init_state[i,0],init_state[i,1]],init_state[i,2])
+            arr = [measure_,meas_pos[0],meas_pos[1]]
+            meas_table.append(arr)
+            rospy.logwarn('OPTIMIZATION ID %s has CURRENT AUV STATE: %s ---CASE 2 measure %s',auvID,init_state[i],measure_)
+    '''rospy.logwarn('AUV ID %s with AUVS_XY: %s',auvID,auvs_xy)
+    rospy.logwarn('AUV ID %s with MEAS_TABLE: %s',auvID, meas_table)
+    rospy.logwarn('AUV ID %s with PI_BAR_OUT: %s',auvID, pi_bar_out)
+    rospy.logwarn('AUV ID %s with INIT_STATE: %s',auvID, init_state)
+    rospy.logwarn('OPTIMIZATION ID %s WAYPOINTS for updating path -> ax:(%s) ay:(%s)',auvID,ax,ay)'''
     estimator.computeState(meas_table)
-
-    return target.x, estimator.phi, estimator.y, s_pose, ax, ay, pi_bar_out
+    
+    return target.x, estimator.phi, estimator.y, s_pose, ax[-1], ay[-1], pi_bar_out
 
 def shutdown_cllbk():
     global auvID, avg_time, avg_nodes
@@ -281,6 +310,7 @@ def callback2(data):
 def callback3(data):
     global policies_intent
     tmp = data.data
+    
     policies_intent[2] = tmp
 
 def callback4(data):
@@ -288,12 +318,18 @@ def callback4(data):
     tmp = data.data
     policies_intent[3] = tmp
 
+def callbackInit(data):
+    global init_state
+    init_state = data.data
+
 def listener(auvID,auvNum):
    
     rospy.Subscriber('/'+str(auvID)+'/estimation', numpy_msg(Floats), callbackTstate)
     rospy.Subscriber('vehicle_state_'+str(auvID), numpy_msg(Floats), callbackSstate)
+    rospy.Subscriber('/init_opt', numpy_msg(Floats), callbackInit)
     callback_list = [callback1, callback2, callback3, callback4]
     for i in range(auvNum):
+        
         if i+1 != auvID:
             rospy.Subscriber('/'+str(i+1)+'/rx_ctrl_policy', numpy_msg(Floats), callback_list[i])
 
@@ -304,7 +340,7 @@ def main():
     params_path = namespace+'auv'
 
     # Get AUV ID and number of vehicles.
-    global auvID, auvNum, avg_nodes, avg_time, policies_intent, s_state, t_state
+    global auvID, auvNum, avg_nodes, avg_time, policies_intent, s_state, t_state, init_state
     auvID = rospy.get_param(params_path+'/auvID')
     auvNum = rospy.get_param(params_path+'/auvNum')
 
@@ -331,21 +367,15 @@ def main():
 
     # Init publishers and subscribers
     pub_ctrl_policy = rospy.Publisher('/'+str(auvID)+'/ctrl_policy',numpy_msg(Floats),queue_size=100)
-    
+
     listener(auvID,auvNum)
+
     rospy.sleep(1)
     while not rospy.is_shutdown():
 
         if t_state[0] != old_t_state[0] and t_state[0] != None:
             
-            for i in range(len(policies_intent)):
-                tmp = policies_intent[i]
-                #if tmp[0] != None:
-                #rospy.loginfo('OPTIMIZATION of AUV ID %s - Policy of intent of AUV %s: %s', auvID, i+1, policies_intent[i])
-             
-            ######## DO OPTIMIZATION HERE ! ########
-                
-            problem = Simple(t_state, s_state, ctrl_choices, policies_intent)
+            problem = Simple(t_state, s_state, ctrl_choices, policies_intent, init_state)
             solver = pybnb.Solver()
             results = solver.solve(problem,queue_strategy="bound" ,node_limit=limit)#tnode_limit=limi #Uniform cost search con "objective"
             best_node_states = results.best_node.state #objective_stop=90000,time_limit=5 - other queue strategies
@@ -359,6 +389,7 @@ def main():
             for i in range(header.config.H):
                 msg.append(output_policy[i])#appendi la sequenza ottimale di controllo
             pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
+            rospy.loginfo('OPTIMIZATION ID %s DONE!',auvID)
 
         if int(t) == (header.config.TIME_DURATION-1):
             rospy.on_shutdown(shutdown_cllbk)
