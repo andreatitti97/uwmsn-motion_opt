@@ -55,7 +55,7 @@ def compute_cost(phi):
         tmp_phi[i,:] = [a[0],a[1]]
     
     PHI = np.dot(np.transpose(tmp_phi),tmp_phi)
-    rospy.loginfo('OPTIMIZATION ID %s --------------------------------REGRESSOR %s',auvID,PHI)
+    
     return np.linalg.norm(np.linalg.inv(PHI),ord=2)*np.linalg.norm(PHI,ord=2)
 
 class Target():
@@ -124,6 +124,7 @@ class Simple(pybnb.Problem):
                 tmp[i,j] = init_state[j+(i*3)]
 
         self.init_s_state = tmp
+        
         if v_n != 0:
             self.v_n = v_n
         else:
@@ -227,6 +228,7 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
             else:
                 ax_j,ay_j = [], []
                 auvs_xy[i] = [j_pi_bar[0],j_pi_bar[1],j_pi_bar[2]]
+                
                 j_waypoints = j_pi_bar[3] # to change if more waypoint at this stage
                 ax_j.append(j_pi_bar[0])
                 ay_j.append(j_pi_bar[1])
@@ -253,7 +255,7 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
     for j in range(4):  
         tmp[j]=target.x[j]
     target.x = target.F*tmp
-   
+    
     # Simulate measurements TODO: (REPRODUCE THE TDMA Sampling!!, not measure everything at the end)
     for i in range(auvNum):
         tmp = auvs_xy[i]
@@ -262,19 +264,24 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
             [measure_, rel_bearing_, meas_pos] = sensors[i].measureBearing(target.x[0],target.x[1],[tmp[0],tmp[1]],tmp[2])
             arr = [measure_,meas_pos[0],meas_pos[1]]
             meas_table.append(arr)
-            rospy.logwarn('OPTIMIZATION ID %s has CURRENT AUV STATE: %s ---CASE 1 measure %s',auvID,tmp,measure_)
+            #rospy.logwarn('OPTIMIZATION ID %s has CURRENT AUV STATE: %s ---CASE 1 measure %s',auvID,tmp,measure_)
         else:
-           
-            [measure_, rel_bearing_, meas_pos] = sensors[i].measureBearing(target.x[0],target.x[1],[init_state[i,0],init_state[i,1]],init_state[i,2])
+            tmp = init_state[i]
+            [measure_, rel_bearing_, meas_pos] = sensors[i].measureBearing(target.x[0],target.x[1],[tmp[0],tmp[1]],tmp[2])
             arr = [measure_,meas_pos[0],meas_pos[1]]
             meas_table.append(arr)
-            rospy.logwarn('OPTIMIZATION ID %s has CURRENT AUV STATE: %s ---CASE 2 measure %s',auvID,init_state[i],measure_)
-    '''rospy.logwarn('AUV ID %s with AUVS_XY: %s',auvID,auvs_xy)
+            #rospy.logwarn('OPTIMIZATION ID %s has CURRENT AUV STATE: %s ---CASE 2 measure %s',auvID,tmp,measure_)
+    
+    '''
+    rospy.logwarn('OPTIMIZATION ID %s TARGET ESTIMATION; %s',auvID,target.x)
+    rospy.logwarn('AUV ID %s with AUVS_XY: %s',auvID,auvs_xy)
     rospy.logwarn('AUV ID %s with MEAS_TABLE: %s',auvID, meas_table)
     rospy.logwarn('AUV ID %s with PI_BAR_OUT: %s',auvID, pi_bar_out)
     rospy.logwarn('AUV ID %s with INIT_STATE: %s',auvID, init_state)
-    rospy.logwarn('OPTIMIZATION ID %s WAYPOINTS for updating path -> ax:(%s) ay:(%s)',auvID,ax,ay)'''
+    rospy.logwarn('OPTIMIZATION ID %s WAYPOINTS for updating path -> ax:(%s) ay:(%s)',auvID,ax,ay)
+    '''
     estimator.computeState(meas_table)
+
     
     return target.x, estimator.phi, estimator.y, s_pose, ax[-1], ay[-1], pi_bar_out
 
@@ -289,8 +296,8 @@ def shutdown_cllbk():
 
 def callbackTstate(data):
     global t_state
-    tmp = data.data
-    t_state = tmp
+    t_state = data.data
+    
 
 def callbackSstate(data):
     global s_state
@@ -386,8 +393,11 @@ def main():
             output_policy = best_node_states[4]
             msg = [s_state[0],s_state[1],s_state[2]]
 
-            for i in range(header.config.H):
-                msg.append(output_policy[i])#appendi la sequenza ottimale di controllo
+            for i in range(header.config.H+1):
+                if i < header.config.H:
+                    msg.append(output_policy[i])#appendi la sequenza ottimale di controllo
+                else:
+                    msg.append(0.0)
             pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
             rospy.loginfo('OPTIMIZATION ID %s DONE!',auvID)
 
