@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import rospy
 from rospy_tutorials.msg import Floats
 from rospy.numpy_msg import numpy_msg
+from math import atan2
 # IMPORT SOLVER LIBRARY
 import pybnb #THIS MAY CHANGE ACCORDING TO THE APPLICATION
 
@@ -37,15 +38,16 @@ for i in range(len(policies_intent)):
 cubicSpline = header.planner
 desired_vel = header.config.AUV_VEL
 
-def update_path(ax, ay, waypoint, s_pose, desired_vel, DT):
-    
+def update_path(ax, ay, waypoint, ayaw, desired_vel, DT):
+        
         a_i = [ax[-1],ay[-1]]
-        ax.append(np.cos(s_pose[2]+waypoint)*desired_vel*DT+a_i[0])
-        ay.append(np.sin(s_pose[2]+waypoint)*desired_vel*DT+a_i[1])
+        
+        ax.append(np.cos(ayaw+waypoint)*desired_vel*DT+a_i[0])
+        ay.append(np.sin(ayaw+waypoint)*desired_vel*DT+a_i[1])
         
         path = cubicSpline.CubicSpline2D(ax, ay)
-
-        return path, ax, ay
+        ayaw = ayaw+waypoint
+        return path, ax, ay, ayaw
 
 def compute_cost(phi):
     length_y = len(phi)
@@ -105,6 +107,8 @@ class Simple(pybnb.Problem):
         self.sensors = sensors
         self.controller = cpf_control
         self.ctrl_cmds = ctrl_cmds
+
+        rospy.loginfo('OPTIMIZATION ID %s INITIAL CTRL_CMDS: %s',auvID,self.ctrl_cmds)
         self.pi_bar = pi_bar
         self._x_hat = x_hat
         self.P = np.eye(4)
@@ -129,8 +133,8 @@ class Simple(pybnb.Problem):
             self.v_n = v_n
         else:
             self.v_n = header.config.AUV_VEL
-        self.ax = [s_state[0]]
-        self.ay = [s_state[1]]
+        self.ax = [s[0]]
+        self.ay = [s[1]]
         self.d = 0 #distance travelled on the path
 
     # Required methods for grapth generation and searching
@@ -161,22 +165,49 @@ class Simple(pybnb.Problem):
             ax_.append(ax[i])
             ay_.append(ay[i])
         for i in range(header.config.U):
-            x, phi, y, s, tmp_ax, tmp_ay, tmp_pi_bar = simulation(self.ctrl_cmds[i], x_hat, self.P, s, self.sensors, ax, ay, self.v_n, self.DT, pi_bar, self.init_s_state)
+            x, phi, y, tmp_s, tmp_ax, tmp_ay, tmp_pi_bar = simulation(self.ctrl_cmds[i], x_hat, self.P, s, self.sensors, ax, ay, self.v_n, self.DT, pi_bar, self.init_s_state)
             
             # Update the sequence of control decisions
             tmp = [self.ctrl_cmds[i]]
             choices = self.choices + tmp
-            
+            if len(choices) >= 2:
+                self.ctrl_cmds = header.config.ctrl_cmd
             # If we reached the planning horizon we subtract the DELTA to stop the algorithm and choose only terminal nodes
             if len(choices) == header.config.H:
                 self.value = self.value - self.initial_cost ##THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENCE
                 self._bound = self.value #- cost1 
-                tmp_pi_bar.append(0.0)#TODO: HEURISTIC FUNCTION 
+                tmp_pi_bar.append([0.0])#TODO: HEURISTIC FUNCTION 
             father_value = self.value #THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENC
-            
+            penalty = 0
+            penalty_d = 0
+            d_thresh = 25
+            delta_fd = np.pi/4
+            tmp = []
+
+            for i in range(len(tmp_pi_bar)):
+                j_pi_bar = tmp_pi_bar[i]
+
+                if len(j_pi_bar) >= 4:
+                    tmp_x = np.cos(j_pi_bar[2]+j_pi_bar[3])*self.v_n*self.DT+j_pi_bar[0]
+                    tmp_y = np.cos(j_pi_bar[2]+j_pi_bar[3])*self.v_n*self.DT+j_pi_bar[1]
+
+                    tmp = np.sqrt((tmp_y-tmp_s[1])**2+(tmp_x-tmp_s[0])**2)
+                    if tmp > d_thresh:
+                        penalty_d = self.initial_cost
             # Add the cost of the node to the sequence
+            if len(choices) < header.config.H:
+                for i in range(len(choices)-1):
+                    tmp_ = (choices[i]) - (choices[i+1])
+                    
+                    if np.abs(tmp_) > delta_fd:
+                        penalty = self.initial_cost
+            # Magnitude of the cost --> DECINE
             cost = compute_cost(phi)
-            child_value = father_value + cost
+            
+            cost2 = (np.sqrt((x[0]-s[0])**2+(x[1]-s[1])**2))
+            weigths = [1.0, 100.0]
+            #rospy.logwarn('OPTIMIZATION id %s COST1 %s COST2 %s',auvID,cost,cost2)
+            child_value = father_value + weigths[0]*cost + weigths[1]*cost2 #+ penalty +penalty_d
             
             # Branch the tree
             child = pybnb.Node()
@@ -187,13 +218,15 @@ class Simple(pybnb.Problem):
                 waypoints_y.append(ay_[i])
             waypoints_x.append(tmp_ax)
             waypoints_y.append(tmp_ay)
-            child.state = (x, s, child_value, self._bound, choices, waypoints_x, waypoints_y, tmp_pi_bar)
+            child.state = (x, tmp_s, child_value, self._bound, choices, waypoints_x, waypoints_y, tmp_pi_bar)
             ax.pop(-1)
             ay.pop(-1)
             yield child
 
 def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, init_state):
-    
+    #if auvID == 1:
+    #    rospy.logwarn('OPTIMIZATION ID %s SENSOR POSE PRE SIMULATION; %s',auvID,s_pose)
+    #    rospy.logwarn('OPTIMIZATION ID %s WAYPOINTS PRE updating path -> ax:(%s) ay:(%s)',auvID,ax,ay)
     # Temporal Variable
     j = 0, 0 #time and counter init
     meas_table = []
@@ -204,14 +237,11 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
 
     # Initialize data structures for agents state
     auvs_xy = []
-    ref = [] # [rx,ry,ryaw]^j
+
     for i in range(auvNum):
         auvs_xy.append([])
-        ref.append([])
-        for j in range((len(s_state)+header.config.H)):
+        for j in range((len(s_pose)+header.config.H)):
             auvs_xy[i].append(0.0)
-            ref[i].append(0.0)
-    
    
     pi_bar_out = []
     # Compute the path of the j-th neighbours
@@ -224,7 +254,13 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
         if np.sum(j_pi_bar) != 0 or auvID == i+1:
             if auvID == i+1:
           # Compute the path of the i-th AUV acoording to the choosen command
-                path_j, ax, ay = update_path(ax, ay, ctrl_input, s_pose, v_n, DT)
+                path, ax, ay, ayaw = update_path(ax, ay, ctrl_input, s_pose[2], v_n, DT)
+                
+                
+                #[rx, ry, ryaw, rk, s] = header.utils.calc_spline_course(path,DT)
+                s_pose = [ax[-1],ay[-1],ayaw]
+                out = s_pose
+                
             else:
                 ax_j,ay_j = [], []
                 auvs_xy[i] = [j_pi_bar[0],j_pi_bar[1],j_pi_bar[2]]
@@ -232,13 +268,14 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
                 j_waypoints = j_pi_bar[3] # to change if more waypoint at this stage
                 ax_j.append(j_pi_bar[0])
                 ay_j.append(j_pi_bar[1])
-                path_j, ax_j, ay_j = update_path(ax_j, ay_j, j_waypoints, auvs_xy[i], v_n, DT)
-            [rx_j, ry_j, ryaw_j, rk, s] = header.utils.calc_spline_course(path_j,DT)
-            auvs_xy[i] = [rx_j[-1],ry_j[-1],ryaw_j[-1]]
+                path_j, ax_j, ay_j, ayaw_j = update_path(ax_j, ay_j, j_waypoints, j_pi_bar[2], v_n, DT)
+                
+                auvs_xy[i] = [ax_j[-1],ay_j[-1],ayaw_j]
+                out = auvs_xy[i]
+
             if len(j_pi_bar) > 3:
                 j_pi_bar = np.delete(j_pi_bar,3)
-            out = auvs_xy[i]
-
+            
             for j in range(len(j_pi_bar[3:len(j_pi_bar)])):
                 out.append(j_pi_bar[j+3])
         else:
@@ -248,17 +285,22 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
             for i in range(len(j_pi_bar)):
                 out.append(0.0)
 
-        pi_bar_out.append(out)        
+        pi_bar_out.append(out)    
 
     # Propagate target state estimation
     tmp = np.zeros((4,1))
+    old_t = target.x
     for j in range(4):  
         tmp[j]=target.x[j]
     target.x = target.F*tmp
     
     # Simulate measurements TODO: (REPRODUCE THE TDMA Sampling!!, not measure everything at the end)
+    auvs_xy[auvID-1] = s_pose #TODO CHECK WHY FUNDAMENTAL
     for i in range(auvNum):
-        tmp = auvs_xy[i]
+        if auvID == i+1:
+            tmp = s_pose
+        else:
+            tmp = auvs_xy[i]
         if np.sum(tmp) != 0.0 or auvID == (i+1):
             
             [measure_, rel_bearing_, meas_pos] = sensors[i].measureBearing(target.x[0],target.x[1],[tmp[0],tmp[1]],tmp[2])
@@ -272,16 +314,39 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
             meas_table.append(arr)
             #rospy.logwarn('OPTIMIZATION ID %s has CURRENT AUV STATE: %s ---CASE 2 measure %s',auvID,tmp,measure_)
     
-    '''
-    rospy.logwarn('OPTIMIZATION ID %s TARGET ESTIMATION; %s',auvID,target.x)
-    rospy.logwarn('AUV ID %s with AUVS_XY: %s',auvID,auvs_xy)
-    rospy.logwarn('AUV ID %s with MEAS_TABLE: %s',auvID, meas_table)
-    rospy.logwarn('AUV ID %s with PI_BAR_OUT: %s',auvID, pi_bar_out)
-    rospy.logwarn('AUV ID %s with INIT_STATE: %s',auvID, init_state)
-    rospy.logwarn('OPTIMIZATION ID %s WAYPOINTS for updating path -> ax:(%s) ay:(%s)',auvID,ax,ay)
-    '''
+    
+    
     estimator.computeState(meas_table)
+    '''if auvID == 1:
 
+        rospy.logwarn('OPTIMIZATION ID %s SENSOR POSE; %s',auvID,s_pose)
+        #rospy.logwarn('OPTIMIZATION ID %s [rx, ry, ryaw]; %s',auvID,[rx, ry, ryaw])
+        rospy.logwarn('AUV ID %s with AUVS_XY: %s',auvID,auvs_xy)
+        rospy.logwarn('AUV ID %s with MEAS_TABLE: %s',auvID, meas_table)
+        rospy.logwarn('AUV ID %s with PI_BAR_OUT: %s',auvID, pi_bar_out)
+        rospy.logwarn('AUV ID %s with INIT_STATE: %s',auvID, init_state)
+        rospy.logwarn('OPTIMIZATION ID %s WAYPOINTS POST updating path -> ax:(%s) ay:(%s)',auvID,ax,ay)
+    
+        plt.plot(s_pose[0],s_pose[1],'oy')
+        plt.plot(old_t[0],old_t[1],'ok')
+        plt.plot(target.x[0],target.x[1],'or')
+        plt.plot(ax,ay,'xr')
+
+        for i in range(len(auvs_xy)):
+            tmp = auvs_xy[i]
+            
+            if np.sum(tmp) != 0.0 and auvID != i+1:
+                plt.plot(tmp[0],tmp[1],'om')
+            else:
+                tmp = init_state[i]
+            
+                plt.plot(tmp[0],tmp[1],'om')
+                
+            tmp = init_state[i]
+            plt.plot(init_state[i,0],init_state[i,1],'og')
+        plt.grid()
+        plt.axis('equal')
+        plt.show()'''
     
     return target.x, estimator.phi, estimator.y, s_pose, ax[-1], ay[-1], pi_bar_out
 
@@ -357,17 +422,20 @@ def main():
     # ROS simulation parameters
     Hz = 1/(header.config.TIME_STEP) #NB: different from sampling rate for move things, this is ros rate   
     rate = rospy.Rate(Hz)
-
+    listener(auvID,auvNum)
     # Init time variables and counters and lists
-    t, count1 = 0,0
-    avg_time, avg_nodes = [],[]
+    t, count1, count_low, count_max = 0,0, 0,0
+    
+    avg_time, avg_nodes, old_ctrls = [],[],[]
     old_t_state = [None, None, None, None]
 
     # Load simulation parames from config file
     t_scaler = header.config.TIME_SCALER
     dt = header.config.TIME_STEP*t_scaler
+    u_max = header.config.u_max
+    delta_u = header.config.delta_u
+    
     ctrl_choices = header.config.ctrl_cmd
-
     limit = 0.0# Compute nodes limit according to RHC with finite memory
     for i in range(header.config.H+1):
             limit += header.config.U**i
@@ -375,14 +443,13 @@ def main():
     # Init publishers and subscribers
     pub_ctrl_policy = rospy.Publisher('/'+str(auvID)+'/ctrl_policy',numpy_msg(Floats),queue_size=100)
 
-    listener(auvID,auvNum)
 
     rospy.sleep(1)
     while not rospy.is_shutdown():
 
         if t_state[0] != old_t_state[0] and t_state[0] != None:
-            
-            problem = Simple(t_state, s_state, ctrl_choices, policies_intent, init_state)
+            rospy.loginfo('OPTIMIZATION ID %s STARTING with POLICIES of INTENT: %s and V_n: %s',auvID,policies_intent,t_state[4])
+            problem = Simple(t_state[0:4], s_state, ctrl_choices, policies_intent, init_state, t_state[4])
             solver = pybnb.Solver()
             results = solver.solve(problem,queue_strategy="bound" ,node_limit=limit)#tnode_limit=limi #Uniform cost search con "objective"
             best_node_states = results.best_node.state #objective_stop=90000,time_limit=5 - other queue strategies
@@ -399,7 +466,45 @@ def main():
                 else:
                     msg.append(0.0)
             pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
-            rospy.loginfo('OPTIMIZATION ID %s DONE!',auvID)
+            rospy.loginfo('OPTIMIZATION ID %s DONE! --> Output Policy: %s',auvID,msg)
+
+            
+            old_ctrls.append(output_policy[0])
+            # Update the ctrl_choices
+            
+            # Adapt online the heading changes: # TO DEBUG !!!!! OR TO TUNE PROPERLY -  in theory done to check
+            if len(old_ctrls) == 3:
+                for i in range(len(old_ctrls)):
+                    if [0-(1e-3)] <=  np.abs(old_ctrls[i])-(1e-3) <= header.config.u_max *2/(header.config.U):
+                        count_low += 1 
+                        if count_low == 3:
+                            if u_max <= header.config.MIN:
+                                u_max = u_max
+                                count_low = 0
+                            else:
+                                print('DECREASING K_MAX----------------------------')
+                                u_max  = u_max  - delta_u
+                                count_low = 0
+                    elif np.abs(old_ctrls[i]) >= u_max :
+                        count_max += 1
+                        if count_max == 3:
+                            if u_max >= header.config.MAX:
+                                u_max = u_max
+                                count_max = 0
+                            else:
+                                print('INCREASING K_MAX++++++++++++++++++++++++++++')
+                                u_max  = u_max  + delta_u
+                                count_max = 0
+                count_low = 0
+                count_max = 0
+                old_ctrls = []
+
+                #ctrl_choices = [-u_max, -u_max*4/(header.config.U),-u_max*2/(header.config.U),0,
+                #                u_max*2/(header.config.U),u_max*4/(header.config.U),u_max]
+
+                print('COUNT LOW-------------------------------',count_low)
+                print('COUNT MAX+++++++++++++++++++++++++++++++',count_max)
+
 
         if int(t) == (header.config.TIME_DURATION-1):
             rospy.on_shutdown(shutdown_cllbk)
