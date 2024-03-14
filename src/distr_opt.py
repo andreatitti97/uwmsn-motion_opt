@@ -170,8 +170,7 @@ class Simple(pybnb.Problem):
             # Update the sequence of control decisions
             tmp = [self.ctrl_cmds[i]]
             choices = self.choices + tmp
-            if len(choices) >= 2:
-                self.ctrl_cmds = header.config.ctrl_cmd
+
             # If we reached the planning horizon we subtract the DELTA to stop the algorithm and choose only terminal nodes
             if len(choices) == header.config.H:
                 self.value = self.value - self.initial_cost ##THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENCE
@@ -193,21 +192,21 @@ class Simple(pybnb.Problem):
 
                     tmp = np.sqrt((tmp_y-tmp_s[1])**2+(tmp_x-tmp_s[0])**2)
                     if tmp > d_thresh:
-                        penalty_d = self.initial_cost
+                        penalty_d = self.initial_cost/header.config.H
             # Add the cost of the node to the sequence
             if len(choices) < header.config.H:
                 for i in range(len(choices)-1):
                     tmp_ = (choices[i]) - (choices[i+1])
                     
                     if np.abs(tmp_) > delta_fd:
-                        penalty = self.initial_cost
+                        penalty = self.initial_cost/header.config.H
             # Magnitude of the cost --> DECINE
             cost = compute_cost(phi)
             
             cost2 = (np.sqrt((x[0]-s[0])**2+(x[1]-s[1])**2))
-            weigths = [1.0, 100.0]
+            weigths = [1.0, 1.0]
             #rospy.logwarn('OPTIMIZATION id %s COST1 %s COST2 %s',auvID,cost,cost2)
-            child_value = father_value + weigths[0]*cost + weigths[1]*cost2 #+ penalty +penalty_d
+            child_value = father_value + weigths[0]*cost + weigths[1]*cost2 + penalty +penalty_d
             
             # Branch the tree
             child = pybnb.Node()
@@ -295,7 +294,7 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
     target.x = target.F*tmp
     
     # Simulate measurements TODO: (REPRODUCE THE TDMA Sampling!!, not measure everything at the end)
-    auvs_xy[auvID-1] = s_pose #TODO CHECK WHY FUNDAMENTAL
+    #auvs_xy[auvID-1] = s_pose #TODO CHECK WHY FUNDAMENTAL
     for i in range(auvNum):
         if auvID == i+1:
             tmp = s_pose
