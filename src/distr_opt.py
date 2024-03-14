@@ -59,6 +59,22 @@ def compute_cost(phi):
     PHI = np.dot(np.transpose(tmp_phi),tmp_phi)
     
     return np.linalg.norm(np.linalg.inv(PHI),ord=2)*np.linalg.norm(PHI,ord=2)
+   
+
+def compute_cost2(phi):
+    # Compute Covariance of the target state
+    R = np.zeros((len(phi),len(phi))) #matrice diagonale perchè errori sulle singole misure indipendenti tra loro            
+    for i in range(len(phi)): 
+        for j in range(len(phi)):
+            if i == j:
+                R[i,j] = (header.config.SIGMA_MEAS)
+            else:
+                R[i,j] = 0 
+
+    a = header.config.SIGMA_MEAS
+    cov = np.linalg.inv(np.dot(np.dot(np.transpose(phi),np.linalg.inv(a*np.identity(len(phi)))),phi))
+        
+    return np.trace(cov)
 
 class Target():
     def __init__(self, init_state, dt, P=[]):
@@ -87,13 +103,12 @@ class Estimation():
         for i in range(len(table)):
             input_meas = table[i]
             self.regressorUpdate(input_meas[0],input_meas[1],input_meas[2])
-        # Re-arrange python list into numpy array for matrix moltiplication
-        '''tmp_y = np.zeros((len(self.y),1))
-        for i in range(len(self.y)):
-            tmp_y[i] = self.y[i]'''
-        # Compute State (OPTIONAL, in this case we need only the conditioning to assigne the cost)
-        #self.x = np.dot(np.linalg.pinv(self.phi),tmp_y)
-        #rospy.logwarn('OPTIMIZATION ID %s TARGET ESTIMATION: %s',auvID,self.x)
+        
+def sig(x):
+    
+    alpha = header.config.alpha
+    gamma = header.config.gamma
+    return 1/(1+np.power(np.e,x))
 
 class Simple(pybnb.Problem):
     def __init__(self, x_hat, s, ctrl_cmds, pi_bar, init_state, v_n = 0, cpf_control = []):
@@ -179,7 +194,8 @@ class Simple(pybnb.Problem):
             father_value = self.value #THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENC
             penalty = 0
             penalty_d = 0
-            d_thresh = 25
+            d_max = header.config.d*5
+            d_min = header.config.d/2
             delta_fd = np.pi/4
             tmp = []
 
@@ -191,7 +207,9 @@ class Simple(pybnb.Problem):
                     tmp_y = np.cos(j_pi_bar[2]+j_pi_bar[3])*self.v_n*self.DT+j_pi_bar[1]
 
                     tmp = np.sqrt((tmp_y-tmp_s[1])**2+(tmp_x-tmp_s[0])**2)
-                    if tmp > d_thresh:
+                    if tmp > d_max:
+                        penalty_d = self.initial_cost/header.config.H
+                    if tmp < d_min:
                         penalty_d = self.initial_cost/header.config.H
             # Add the cost of the node to the sequence
             if len(choices) < header.config.H:
@@ -204,7 +222,11 @@ class Simple(pybnb.Problem):
             cost = compute_cost(phi)
             
             cost2 = (np.sqrt((x[0]-s[0])**2+(x[1]-s[1])**2))
-            weigths = [1.0, 1.0]
+            
+            if cost2 < 50:
+                weigths = [5.0, 1.0]
+            elif cost2 >= 50:
+                weigths = [1.0, 5.0]
             #rospy.logwarn('OPTIMIZATION id %s COST1 %s COST2 %s',auvID,cost,cost2)
             child_value = father_value + weigths[0]*cost + weigths[1]*cost2 + penalty +penalty_d
             
@@ -223,9 +245,7 @@ class Simple(pybnb.Problem):
             yield child
 
 def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, init_state):
-    #if auvID == 1:
-    #    rospy.logwarn('OPTIMIZATION ID %s SENSOR POSE PRE SIMULATION; %s',auvID,s_pose)
-    #    rospy.logwarn('OPTIMIZATION ID %s WAYPOINTS PRE updating path -> ax:(%s) ay:(%s)',auvID,ax,ay)
+    
     # Temporal Variable
     j = 0, 0 #time and counter init
     meas_table = []
@@ -254,21 +274,16 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
             if auvID == i+1:
           # Compute the path of the i-th AUV acoording to the choosen command
                 path, ax, ay, ayaw = update_path(ax, ay, ctrl_input, s_pose[2], v_n, DT)
-                
-                
-                #[rx, ry, ryaw, rk, s] = header.utils.calc_spline_course(path,DT)
                 s_pose = [ax[-1],ay[-1],ayaw]
                 out = s_pose
                 
             else:
                 ax_j,ay_j = [], []
                 auvs_xy[i] = [j_pi_bar[0],j_pi_bar[1],j_pi_bar[2]]
-                
                 j_waypoints = j_pi_bar[3] # to change if more waypoint at this stage
                 ax_j.append(j_pi_bar[0])
                 ay_j.append(j_pi_bar[1])
                 path_j, ax_j, ay_j, ayaw_j = update_path(ax_j, ay_j, j_waypoints, j_pi_bar[2], v_n, DT)
-                
                 auvs_xy[i] = [ax_j[-1],ay_j[-1],ayaw_j]
                 out = auvs_xy[i]
 
@@ -316,37 +331,7 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
     
     
     estimator.computeState(meas_table)
-    '''if auvID == 1:
-
-        rospy.logwarn('OPTIMIZATION ID %s SENSOR POSE; %s',auvID,s_pose)
-        #rospy.logwarn('OPTIMIZATION ID %s [rx, ry, ryaw]; %s',auvID,[rx, ry, ryaw])
-        rospy.logwarn('AUV ID %s with AUVS_XY: %s',auvID,auvs_xy)
-        rospy.logwarn('AUV ID %s with MEAS_TABLE: %s',auvID, meas_table)
-        rospy.logwarn('AUV ID %s with PI_BAR_OUT: %s',auvID, pi_bar_out)
-        rospy.logwarn('AUV ID %s with INIT_STATE: %s',auvID, init_state)
-        rospy.logwarn('OPTIMIZATION ID %s WAYPOINTS POST updating path -> ax:(%s) ay:(%s)',auvID,ax,ay)
-    
-        plt.plot(s_pose[0],s_pose[1],'oy')
-        plt.plot(old_t[0],old_t[1],'ok')
-        plt.plot(target.x[0],target.x[1],'or')
-        plt.plot(ax,ay,'xr')
-
-        for i in range(len(auvs_xy)):
-            tmp = auvs_xy[i]
-            
-            if np.sum(tmp) != 0.0 and auvID != i+1:
-                plt.plot(tmp[0],tmp[1],'om')
-            else:
-                tmp = init_state[i]
-            
-                plt.plot(tmp[0],tmp[1],'om')
-                
-            tmp = init_state[i]
-            plt.plot(init_state[i,0],init_state[i,1],'og')
-        plt.grid()
-        plt.axis('equal')
-        plt.show()'''
-    
+        
     return target.x, estimator.phi, estimator.y, s_pose, ax[-1], ay[-1], pi_bar_out
 
 def shutdown_cllbk():
@@ -442,7 +427,6 @@ def main():
     # Init publishers and subscribers
     pub_ctrl_policy = rospy.Publisher('/'+str(auvID)+'/ctrl_policy',numpy_msg(Floats),queue_size=100)
 
-
     rospy.sleep(1)
     while not rospy.is_shutdown():
 
@@ -518,3 +502,34 @@ def main():
 if __name__ == '__main__':
     
     main()
+
+'''if auvID == 1:
+
+        rospy.logwarn('OPTIMIZATION ID %s SENSOR POSE; %s',auvID,s_pose)
+        #rospy.logwarn('OPTIMIZATION ID %s [rx, ry, ryaw]; %s',auvID,[rx, ry, ryaw])
+        rospy.logwarn('AUV ID %s with AUVS_XY: %s',auvID,auvs_xy)
+        rospy.logwarn('AUV ID %s with MEAS_TABLE: %s',auvID, meas_table)
+        rospy.logwarn('AUV ID %s with PI_BAR_OUT: %s',auvID, pi_bar_out)
+        rospy.logwarn('AUV ID %s with INIT_STATE: %s',auvID, init_state)
+        rospy.logwarn('OPTIMIZATION ID %s WAYPOINTS POST updating path -> ax:(%s) ay:(%s)',auvID,ax,ay)
+    
+        plt.plot(s_pose[0],s_pose[1],'oy')
+        plt.plot(old_t[0],old_t[1],'ok')
+        plt.plot(target.x[0],target.x[1],'or')
+        plt.plot(ax,ay,'xr')
+
+        for i in range(len(auvs_xy)):
+            tmp = auvs_xy[i]
+            
+            if np.sum(tmp) != 0.0 and auvID != i+1:
+                plt.plot(tmp[0],tmp[1],'om')
+            else:
+                tmp = init_state[i]
+            
+                plt.plot(tmp[0],tmp[1],'om')
+                
+            tmp = init_state[i]
+            plt.plot(init_state[i,0],init_state[i,1],'og')
+        plt.grid()
+        plt.axis('equal')
+        plt.show()'''
