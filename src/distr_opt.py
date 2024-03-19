@@ -23,20 +23,20 @@ spec.loader.exec_module(header)
 
 # Init global variables for callbacks
 t_est_x, t_est_y, s_state_x, s_state_y = [], [], [], []
-t_state = [None, None, None, None]
+t_state = [None, None, None, None, None]
 s_state = [None, None, None]
 policies_intent = [[], [], [], []]
 init_state = None
+init_d = None
 
 for i in range(len(policies_intent)):
     tmp = []
-    for j in range((len(s_state)+header.config.H)):
+    for j in range((len(s_state)+1+header.config.H)):
         tmp.append(0.0)
     policies_intent[i] = tmp
 
 # Global Variables
 cubicSpline = header.planner
-desired_vel = header.config.AUV_VEL
 
 def update_path(ax, ay, waypoint, ayaw, desired_vel, DT):
         
@@ -77,9 +77,9 @@ def compute_cost2(phi):
     return np.trace(cov)
 
 class Target():
-    def __init__(self, init_state, dt, P=[]):
+    def __init__(self, x, dt, P=[]):
         'INPUT: estimate state of the target, eventualy associate P for uscented transform'
-        self.x = init_state
+        self.x = x
         self.dt = dt
         self.P = P
         self.F = np.matrix([[1,0,self.dt,0], # Target State Transition Matrix - CV
@@ -104,14 +104,12 @@ class Estimation():
             input_meas = table[i]
             self.regressorUpdate(input_meas[0],input_meas[1],input_meas[2])
         
-def sig(x):
-    
-    alpha = header.config.alpha
-    gamma = header.config.gamma
-    return 1/(1+np.power(np.e,x))
+def sig(x,d_max,alpha):
+
+    return 1/(1 + np.exp(alpha*(-x+d_max/2)))
 
 class Simple(pybnb.Problem):
-    def __init__(self, x_hat, s, ctrl_cmds, pi_bar, init_state, v_n = 0, cpf_control = []):
+    def __init__(self, x_hat, s, ctrl_cmds, pi_bar, init_state, init_d, v_n = 0, cpf_control = []):
         
         inf = float("inf")
         
@@ -129,13 +127,16 @@ class Simple(pybnb.Problem):
         self.P = np.eye(4)
         self._s = s
         
+        self.init_d = init_d
+        
         # Optimization Parameters
         self.value = header.config.DELTA
         self.initial_cost = header.config.DELTA
         self.DT = header.config.DT
         self._bound = -inf # initial_cost-100 #lower bound 
         self.choices = []
-        
+        self.alpha = 0.08 #parma sigmoid activation funct
+
         # Variables for path init
         tmp = np.zeros((auvNum,3))
         for i in range(len(tmp)):
@@ -194,7 +195,7 @@ class Simple(pybnb.Problem):
             father_value = self.value #THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENC
             penalty = 0
             penalty_d = 0
-            d_max = header.config.d*5
+            d_max = header.config.d*2
             d_min = header.config.d/2
             delta_fd = np.pi/4
             tmp = []
@@ -202,9 +203,9 @@ class Simple(pybnb.Problem):
             for i in range(len(tmp_pi_bar)):
                 j_pi_bar = tmp_pi_bar[i]
 
-                if len(j_pi_bar) >= 4:
-                    tmp_x = np.cos(j_pi_bar[2]+j_pi_bar[3])*self.v_n*self.DT+j_pi_bar[0]
-                    tmp_y = np.cos(j_pi_bar[2]+j_pi_bar[3])*self.v_n*self.DT+j_pi_bar[1]
+                if len(j_pi_bar) >= 5:
+                    tmp_x = np.cos(j_pi_bar[2]+j_pi_bar[4])*j_pi_bar[3]*self.DT+j_pi_bar[0]
+                    tmp_y = np.cos(j_pi_bar[2]+j_pi_bar[4])*j_pi_bar[3]*self.DT+j_pi_bar[1]
 
                     tmp = np.sqrt((tmp_y-tmp_s[1])**2+(tmp_x-tmp_s[0])**2)
                     if tmp > d_max:
@@ -219,16 +220,17 @@ class Simple(pybnb.Problem):
                     if np.abs(tmp_) > delta_fd:
                         penalty = self.initial_cost/header.config.H
             # Magnitude of the cost --> DECINE
-            cost = compute_cost(phi)
+            cost_g = compute_cost(phi)
+            d_target = (np.sqrt((x[0]-s[0])**2+(x[1]-s[1])**2))
             
-            cost2 = (np.sqrt((x[0]-s[0])**2+(x[1]-s[1])**2))
-            
-            if cost2 < 50:
-                weigths = [5.0, 1.0]
-            elif cost2 >= 50:
-                weigths = [1.0, 5.0]
+            w_d = sig(d_target,self.init_d,self.alpha)
+            w_g = 2.0*sig(d_target,self.init_d,-self.alpha)
+            # weights should be between 0 an 1 and change according to the distance.
+            # other option is to make the reweighted estimation w.r.t. the range.
+            # in theory you weight differently the measures in order to give more importance to near measures0
+
             #rospy.logwarn('OPTIMIZATION id %s COST1 %s COST2 %s',auvID,cost,cost2)
-            child_value = father_value + weigths[0]*cost + weigths[1]*cost2 + penalty +penalty_d
+            child_value = father_value + w_g*cost_g + w_d*d_target + penalty +penalty_d
             
             # Branch the tree
             child = pybnb.Node()
@@ -259,7 +261,7 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
 
     for i in range(auvNum):
         auvs_xy.append([])
-        for j in range((len(s_pose)+header.config.H)):
+        for j in range((len(s_pose)+1+header.config.H)):
             auvs_xy[i].append(0.0)
    
     pi_bar_out = []
@@ -280,22 +282,23 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
             else:
                 ax_j,ay_j = [], []
                 auvs_xy[i] = [j_pi_bar[0],j_pi_bar[1],j_pi_bar[2]]
-                j_waypoints = j_pi_bar[3] # to change if more waypoint at this stage
+                j_waypoints = j_pi_bar[4] # to change if more waypoint at this stage
                 ax_j.append(j_pi_bar[0])
                 ay_j.append(j_pi_bar[1])
-                path_j, ax_j, ay_j, ayaw_j = update_path(ax_j, ay_j, j_waypoints, j_pi_bar[2], v_n, DT)
+                path_j, ax_j, ay_j, ayaw_j = update_path(ax_j, ay_j, j_waypoints, j_pi_bar[2], j_pi_bar[3], DT)
                 auvs_xy[i] = [ax_j[-1],ay_j[-1],ayaw_j]
                 out = auvs_xy[i]
 
-            if len(j_pi_bar) > 3:
-                j_pi_bar = np.delete(j_pi_bar,3)
+            if len(j_pi_bar) > 4:
+                j_pi_bar = np.delete(j_pi_bar,4)
             
-            for j in range(len(j_pi_bar[3:len(j_pi_bar)])):
-                out.append(j_pi_bar[j+3])
+            out.append(j_pi_bar[3])
+            for j in range(len(j_pi_bar[4:len(j_pi_bar)])):
+                out.append(j_pi_bar[j+4])
         else:
-            auvs_xy[i] = [0.0, 0.0, 0.0]
-            if len(j_pi_bar) > 3:
-                j_pi_bar = np.delete(j_pi_bar,3)
+            auvs_xy[i] = [0.0, 0.0, 0.0, 0.0]
+            if len(j_pi_bar) > 4:
+                j_pi_bar = np.delete(j_pi_bar,4)
             for i in range(len(j_pi_bar)):
                 out.append(0.0)
 
@@ -327,9 +330,6 @@ def simulation(ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, i
             arr = [measure_,meas_pos[0],meas_pos[1]]
             meas_table.append(arr)
             #rospy.logwarn('OPTIMIZATION ID %s has CURRENT AUV STATE: %s ---CASE 2 measure %s',auvID,tmp,measure_)
-    
-    
-    
     estimator.computeState(meas_table)
         
     return target.x, estimator.phi, estimator.y, s_pose, ax[-1], ay[-1], pi_bar_out
@@ -374,15 +374,21 @@ def callback4(data):
     tmp = data.data
     policies_intent[3] = tmp
 
-def callbackInit(data):
+def callbackInit1(data):
     global init_state
     init_state = data.data
+
+def callbackInit2(data):
+    global init_d
+    tmp = data.data
+    init_d = tmp[0]
 
 def listener(auvID,auvNum):
    
     rospy.Subscriber('/'+str(auvID)+'/estimation', numpy_msg(Floats), callbackTstate)
     rospy.Subscriber('vehicle_state_'+str(auvID), numpy_msg(Floats), callbackSstate)
-    rospy.Subscriber('/init_opt', numpy_msg(Floats), callbackInit)
+    rospy.Subscriber('/init_opt1', numpy_msg(Floats), callbackInit1)
+    rospy.Subscriber('/init_opt2', numpy_msg(Floats), callbackInit2)
     callback_list = [callback1, callback2, callback3, callback4]
     for i in range(auvNum):
         
@@ -396,7 +402,7 @@ def main():
     params_path = namespace+'auv'
 
     # Get AUV ID and number of vehicles.
-    global auvID, auvNum, avg_nodes, avg_time, policies_intent, s_state, t_state, init_state
+    global auvID, auvNum, avg_nodes, avg_time, policies_intent, s_state, t_state, init_state, init_d
     auvID = rospy.get_param(params_path+'/auvID')
     auvNum = rospy.get_param(params_path+'/auvNum')
 
@@ -431,8 +437,9 @@ def main():
     while not rospy.is_shutdown():
 
         if t_state[0] != old_t_state[0] and t_state[0] != None:
+            
             rospy.loginfo('OPTIMIZATION ID %s STARTING with POLICIES of INTENT: %s and V_n: %s',auvID,policies_intent,t_state[4])
-            problem = Simple(t_state[0:4], s_state, ctrl_choices, policies_intent, init_state, t_state[4])
+            problem = Simple(t_state[0:4], s_state, ctrl_choices, policies_intent, init_state, init_d, t_state[4])
             solver = pybnb.Solver()
             results = solver.solve(problem,queue_strategy="bound" ,node_limit=limit)#tnode_limit=limi #Uniform cost search con "objective"
             best_node_states = results.best_node.state #objective_stop=90000,time_limit=5 - other queue strategies
@@ -441,7 +448,7 @@ def main():
             avg_nodes.append(nodes)
             avg_time.append(wall_time)
             output_policy = best_node_states[4]
-            msg = [s_state[0],s_state[1],s_state[2]]
+            msg = [s_state[0],s_state[1],s_state[2],t_state[4]]
 
             for i in range(header.config.H+1):
                 if i < header.config.H:
