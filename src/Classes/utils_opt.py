@@ -7,15 +7,21 @@ import numpy as np
 # Load the header file as a Python module 
 pkg_directory = os.path.dirname(os.path.dirname(os.path.dirname(pathlib.Path(__file__).parent.resolve())))
 
-header_file = pkg_directory+'/uwmsn-motion_opt'+'/include'+'/uwmsn-motion_opt'
+
+config_file_dir = pkg_directory+'/uwmsn-sim/src/Classes'
 log_path = pkg_directory+'/uwmsn-sim'+'/logs'
 
-spec = importlib.util.spec_from_file_location("module.header", header_file+'/distr_opt_h.py')
-header = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(header)
+
+spec = importlib.util.spec_from_file_location("module.config", config_file_dir+'/config.py')
+config = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(config)
+
+spec = importlib.util.spec_from_file_location("module.planner", config_file_dir+'/spline_planner.py')
+planner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(planner)
 
 # Global Variables
-cubicSpline = header.planner
+cubicSpline = planner
 
 def update_path(ax, ay, waypoint, ayaw, desired_vel, DT):
         
@@ -46,11 +52,11 @@ def compute_cost2(phi):
     for i in range(len(phi)): 
         for j in range(len(phi)):
             if i == j:
-                R[i,j] = (header.config.SIGMA_MEAS)
+                R[i,j] = (config.SIGMA_MEAS)
             else:
                 R[i,j] = 0 
 
-    a = header.config.SIGMA_MEAS
+    a = config.SIGMA_MEAS
     cov = np.linalg.inv(np.dot(np.dot(np.transpose(phi),np.linalg.inv(a*np.identity(len(phi)))),phi))
         
     return np.trace(cov)

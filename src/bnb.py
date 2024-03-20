@@ -7,24 +7,11 @@ import pybnb #THIS MAY CHANGE ACCORDING TO THE APPLICATION
 
 # Load the header file as a Python module 
 pkg_directory = os.path.dirname(os.path.dirname(pathlib.Path(__file__).parent.resolve()))
-directory = pathlib.Path(__file__).parent.resolve()
-
-spec = importlib.util.spec_from_file_location("module.utils", directory/'Classes/utils.py')
-utils = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(utils)
-
-spec = importlib.util.spec_from_file_location("module.estimator", directory/'Classes/estimator.py')
-estimator_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(estimator_module)
-
-spec = importlib.util.spec_from_file_location("module.target", directory/'Classes/target.py')
-target_module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(target_module)
 
 header_file = pkg_directory+'/uwmsn-motion_opt'+'/include'+'/uwmsn-motion_opt'
 log_path = pkg_directory+'/uwmsn-sim'+'/logs'
 
-spec = importlib.util.spec_from_file_location("module.header", header_file+'/distr_opt_h.py')
+spec = importlib.util.spec_from_file_location("module.header", header_file+'/bnb_h.py')
 header = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(header)
 
@@ -82,7 +69,7 @@ class Simple(pybnb.Problem):
         self.DT = header.config.DT
         self._bound = -inf # initial_cost-100 #lower bound 
         self.choices = []
-        self.alpha = 0.08 #parma sigmoid activation funct
+        self.alpha = 0.08 #param for sigmoid activation funct
 
         # Variables for path init
         tmp = np.zeros((self.auvNum,3))
@@ -92,10 +79,7 @@ class Simple(pybnb.Problem):
 
         self.init_s_state = tmp
         
-        if v_n != 0:
-            self.v_n = v_n
-        else:
-            self.v_n = header.config.AUV_VEL
+        self.v_n = v_n
         self.ax = [s[0]]
         self.ay = [s[1]]
         self.d = 0 #distance travelled on the path
@@ -144,10 +128,11 @@ class Simple(pybnb.Problem):
             
 
             # Compute the cost function
-            cost_g = utils.compute_cost(phi)
+            cost_g = header.utils.compute_cost(phi)
             d_target = (np.sqrt((x[0]-s[0])**2+(x[1]-s[1])**2))
-            w_d = utils.sig(d_target,self.init_d,self.alpha)
-            w_g = utils.sig(d_target,self.init_d,-self.alpha)
+            w_d = header.utils.sig(d_target,self.init_d,self.alpha)
+            w_g = header.utils.sig(d_target,self.init_d,-self.alpha)
+            
             penalty, penalty_d = heuristicPenalty(choices, tmp_pi_bar, tmp_s, self.initial_cost, self.DT)
             
             # weights should be between 0 an 1 and change according to the distance.
@@ -177,7 +162,7 @@ class Simple(pybnb.Problem):
             if np.sum(j_pi_bar) != 0 or self.auvID == i+1:
                 if self.auvID == i+1:
             # Compute the path of the i-th AUV acoording to the choosen command
-                    path, ax, ay, ayaw = utils.update_path(ax, ay, ctrl_input, s_pose[2], v_n, DT)
+                    path, ax, ay, ayaw = header.utils.update_path(ax, ay, ctrl_input, s_pose[2], v_n, DT)
                     out = [ax[-1],ay[-1],ayaw]
                     
                 else:
@@ -186,7 +171,7 @@ class Simple(pybnb.Problem):
                     j_waypoints = j_pi_bar[4] # to change if more waypoint at this stage
                     ax_j.append(j_pi_bar[0])
                     ay_j.append(j_pi_bar[1])
-                    path_j, ax_j, ay_j, ayaw_j = utils.update_path(ax_j, ay_j, j_waypoints, j_pi_bar[2], j_pi_bar[3], DT)
+                    path_j, ax_j, ay_j, ayaw_j = header.utils.update_path(ax_j, ay_j, j_waypoints, j_pi_bar[2], j_pi_bar[3], DT)
                     auvs_xy[i] = [ax_j[-1],ay_j[-1],ayaw_j]
                     out = auvs_xy[i]
 
@@ -213,8 +198,8 @@ class Simple(pybnb.Problem):
         meas_table = []
 
         # Init classes for tracker and target
-        target = target_module.Target(x_hat, DT, P)
-        estimator = estimator_module.Estimation()
+        target = header.target_module.Target(x_hat, DT, P)
+        estimator = header.estimator_module.Estimation()
 
         # Initialize data structures for agents state, policies of intent and waypoints
         auvs_xy = []

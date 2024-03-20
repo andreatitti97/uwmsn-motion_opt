@@ -11,16 +11,6 @@ from math import atan2
 
 # Load the header file as a Python module 
 pkg_directory = os.path.dirname(os.path.dirname(pathlib.Path(__file__).parent.resolve()))
-directory = pathlib.Path(__file__).parent.resolve()
-
-spec = importlib.util.spec_from_file_location("module.bnb", directory/'bnb.py')
-bnb = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(bnb)
-
-spec = importlib.util.spec_from_file_location("module.utils", directory/'Classes/utils.py')
-utils = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(utils)
-
 header_file = pkg_directory+'/uwmsn-motion_opt'+'/include'+'/uwmsn-motion_opt'
 log_path = pkg_directory+'/uwmsn-sim'+'/logs'
 
@@ -78,8 +68,8 @@ def callbackInit1(data):
 
 def callbackInit2(data):
     global init_d
-    tmp = data.data
-    init_d = tmp[0]
+    init_d = data.data
+    #init_d = tmp[0]
 
 def shutdown_cllbk():
     global auvID, avg_time, avg_nodes
@@ -121,7 +111,7 @@ def main():
     rate = rospy.Rate(Hz)
     listener(auvID,auvNum)
     # Init time variables and counters and lists
-    t, count1, count_low, count_max = 0,0, 0,0
+    t, count1, count_low, count_max = 0,0,0,0
     
     avg_time, avg_nodes, old_ctrls = [],[],[]
     old_t_state = [None, None, None, None]
@@ -144,61 +134,64 @@ def main():
     while not rospy.is_shutdown():
 
         if t_state[0] != old_t_state[0] and t_state[0] != None:
+            if t_state[4] != -10**3:
             
-            rospy.loginfo('OPTIMIZATION ID %s STARTING with POLICIES of INTENT: %s and V_n: %s',auvID,policies_intent,t_state[4])
-            problem = bnb.Simple(auvNum, auvID, t_state[0:4], s_state, ctrl_choices, policies_intent, init_state, init_d, t_state[4])
-            solver = bnb.pybnb.Solver()
-            results = solver.solve(problem,queue_strategy="bound" ,node_limit=limit)# node_limit=limi #Uniform cost search con "objective"
-                                                                                    # objective_stop=90000,time_limit=5 - other queue strategies
-            best_node_states, wall_time, nodes = results.best_node.state, results.wall_time, results.nodes
-            avg_nodes.append(nodes)
-            avg_time.append(wall_time)
-            output_policy = best_node_states[4]
-            msg = [s_state[0],s_state[1],s_state[2],t_state[4]]
+                rospy.loginfo('OPTIMIZATION ID %s STARTING with POLICIES of INTENT: %s , V_n: %s , Init d: %s',auvID,policies_intent,t_state[4],init_d[auvID-1])
+                problem = header.bnb.Simple(auvNum, auvID, t_state[0:4], s_state, ctrl_choices, policies_intent, init_state, init_d[auvID-1], t_state[4])
+                solver = header.bnb.pybnb.Solver()
+                results = solver.solve(problem,queue_strategy="bound" ,node_limit=limit)# node_limit=limi #Uniform cost search con "objective"
+                                                                                        # objective_stop=90000,time_limit=5 - other queue strategies
+                best_node_states, wall_time, nodes = results.best_node.state, results.wall_time, results.nodes
+                avg_nodes.append(nodes)
+                avg_time.append(wall_time)
+                output_policy = best_node_states[4]
+                msg = [s_state[0],s_state[1],s_state[2],t_state[4]]
 
-            for i in range(header.config.H+1):
-                if i < header.config.H:
-                    msg.append(output_policy[i])#appendi la sequenza ottimale di controllo
-                else:
+                for i in range(header.config.H+1):
+                    if i < header.config.H:
+                        msg.append(output_policy[i])#appendi la sequenza ottimale di controllo
+                    else:
+                        msg.append(0.0)
+                pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
+                rospy.loginfo('OPTIMIZATION ID %s DONE! --> Output Policy: %s',auvID,msg)
+
+                old_ctrls.append(output_policy[0])
+                            
+                # Adapt online the heading changes: # TO DEBUG !!!!! OR TO TUNE PROPERLY -  in theory done to check
+                if len(old_ctrls) == 3:
+                    for i in range(len(old_ctrls)):
+                        if [0-(1e-3)] <=  np.abs(old_ctrls[i])-(1e-3) <= header.config.u_max *2/(header.config.U):
+                            count_low += 1 
+                            if count_low == 3:
+                                if u_max <= header.config.MIN:
+                                    u_max = u_max
+                                    count_low = 0
+                                else:
+                                    print('DECREASING K_MAX----------------------------')
+                                    u_max  = u_max  - delta_u
+                                    count_low = 0
+                        elif np.abs(old_ctrls[i]) >= u_max :
+                            count_max += 1
+                            if count_max == 3:
+                                if u_max >= header.config.MAX:
+                                    u_max = u_max
+                                    count_max = 0
+                                else:
+                                    print('INCREASING K_MAX++++++++++++++++++++++++++++')
+                                    u_max  = u_max  + delta_u
+                                    count_max = 0
+                    count_low = 0
+                    count_max = 0
+                    old_ctrls = []
+                    print('COUNT LOW-------------------------------',count_low)
+                    print('COUNT MAX+++++++++++++++++++++++++++++++',count_max)
+            elif t_state[4] == -10**3:
+                msg = [s_state[0],s_state[1],s_state[2],0.0]
+
+                for i in range(header.config.H+1):
+                    
                     msg.append(0.0)
-            pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
-            rospy.loginfo('OPTIMIZATION ID %s DONE! --> Output Policy: %s',auvID,msg)
-
-            old_ctrls.append(output_policy[0])
-                        
-            # Adapt online the heading changes: # TO DEBUG !!!!! OR TO TUNE PROPERLY -  in theory done to check
-            if len(old_ctrls) == 3:
-                for i in range(len(old_ctrls)):
-                    if [0-(1e-3)] <=  np.abs(old_ctrls[i])-(1e-3) <= header.config.u_max *2/(header.config.U):
-                        count_low += 1 
-                        if count_low == 3:
-                            if u_max <= header.config.MIN:
-                                u_max = u_max
-                                count_low = 0
-                            else:
-                                print('DECREASING K_MAX----------------------------')
-                                u_max  = u_max  - delta_u
-                                count_low = 0
-                    elif np.abs(old_ctrls[i]) >= u_max :
-                        count_max += 1
-                        if count_max == 3:
-                            if u_max >= header.config.MAX:
-                                u_max = u_max
-                                count_max = 0
-                            else:
-                                print('INCREASING K_MAX++++++++++++++++++++++++++++')
-                                u_max  = u_max  + delta_u
-                                count_max = 0
-                count_low = 0
-                count_max = 0
-                old_ctrls = []
-
-                #ctrl_choices = [-u_max, -u_max*4/(header.config.U),-u_max*2/(header.config.U),0,
-                #                u_max*2/(header.config.U),u_max*4/(header.config.U),u_max]
-
-                print('COUNT LOW-------------------------------',count_low)
-                print('COUNT MAX+++++++++++++++++++++++++++++++',count_max)
-
+                pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
 
         if int(t) == (header.config.TIME_DURATION-1):
             rospy.on_shutdown(shutdown_cllbk)
@@ -210,6 +203,7 @@ def main():
 
     rospy.on_shutdown(shutdown_cllbk)
     rospy.spin()
+    
 if __name__ == '__main__':
     
     main()
