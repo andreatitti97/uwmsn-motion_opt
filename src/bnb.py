@@ -4,7 +4,8 @@ import os, pathlib, importlib.util
 import numpy as np
 # IMPORT SOLVER LIBRARY
 import pybnb #THIS MAY CHANGE ACCORDING TO THE APPLICATION
-
+import matplotlib.pyplot as plt
+import rospy
 # Load the header file as a Python module 
 pkg_directory = os.path.dirname(os.path.dirname(pathlib.Path(__file__).parent.resolve()))
 
@@ -15,10 +16,13 @@ spec = importlib.util.spec_from_file_location("module.header", header_file+'/bnb
 header = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(header)
 
-def heuristicPenalty(choices, tmp_pi_bar, tmp_s, initial_cost, DT):
+def heuristicPenalty(choice, tmp_pi_bar, tmp_s, initial_cost, DT, ctrl_cmds):
 
     penalty, penalty_d = 0, 0
     d_max, d_min, delta_fd = header.config.d*2, header.config.d/2, np.pi/4
+    idx = ctrl_cmds.index(min(ctrl_cmds))
+    #delta_fd = 2*np.abs(ctrl_cmds[idx-1]) #chose on of the two
+    delta_fd = 2*np.abs(ctrl_cmds[0])
     tmp = []
 
     for i in range(len(tmp_pi_bar)):
@@ -26,18 +30,20 @@ def heuristicPenalty(choices, tmp_pi_bar, tmp_s, initial_cost, DT):
 
         if len(j_pi_bar) >= 5:
             tmp_x = np.cos(j_pi_bar[2]+j_pi_bar[4])*j_pi_bar[3]*DT+j_pi_bar[0]
-            tmp_y = np.cos(j_pi_bar[2]+j_pi_bar[4])*j_pi_bar[3]*DT+j_pi_bar[1]
+            tmp_y = np.sin(j_pi_bar[2]+j_pi_bar[4])*j_pi_bar[3]*DT+j_pi_bar[1]
             tmp = np.sqrt((tmp_y-tmp_s[1])**2+(tmp_x-tmp_s[0])**2)
-            if tmp > d_max:
+            
+            if tmp >= d_max:
                 penalty_d = initial_cost/header.config.H
-            if tmp < d_min:
+            if tmp <= d_min:
                 penalty_d = initial_cost/header.config.H
     # Add the cost of the node to the sequence
-    if len(choices) < header.config.H:
-        for i in range(len(choices)-1):
-            tmp_ = (choices[i]) - (choices[i+1])
-            if np.abs(tmp_) > delta_fd:
-                penalty = initial_cost/header.config.H
+    #if 1 < len(choices) <= header.config.H:
+    if np.abs(choice) >= delta_fd:  
+        '''for i in range(len(choices)):
+            tmp_ = (choices[i]) - (choices[i-1])
+            if np.abs(tmp_) >= delta_fd:'''
+        penalty = initial_cost/header.config.H
 
     return penalty, penalty_d
 
@@ -112,34 +118,44 @@ class Simple(pybnb.Problem):
             ax_.append(ax[i])
             ay_.append(ay[i])
         for i in range(header.config.U):
-            x, phi, y, tmp_s, tmp_ax, tmp_ay, tmp_pi_bar = self.simulation(self.ctrl_cmds[i], x_hat, self.P, s, self.sensors, ax, ay, self.v_n, self.DT, pi_bar, self.init_s_state)
+            x, phi, y, tmp_s, tmp_ax, tmp_ay, tmp_pi_bar, ranges = self.simulation(self.ctrl_cmds[i], x_hat, self.P, s, self.sensors, ax, ay, self.v_n, self.DT, pi_bar, self.init_s_state)
             
             # Update the sequence of control decisions
             tmp = [self.ctrl_cmds[i]]
             choices = self.choices + tmp
+         
 
             # If we reached the planning horizon we subtract the DELTA to stop the algorithm and choose only terminal nodes
             if len(choices) == header.config.H:
                 self.value = self.value - self.initial_cost ##THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENCE
                 self._bound = self.value #- cost1 
-                tmp_pi_bar.append([0.0])#TODO: HEURISTIC FUNCTION 
+                #tmp_pi_bar.append([0.0])#TODO: HEURISTIC FUNCTION 
+                
+                
 
             father_value = self.value #THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENC
             
 
-            # Compute the cost function
-            cost_g = header.utils.compute_cost(phi)
-            d_target = (np.sqrt((x[0]-s[0])**2+(x[1]-s[1])**2))
+            # Compute the cost functions
+            penalty, penalty_d = heuristicPenalty(self.ctrl_cmds[i], tmp_pi_bar, tmp_s, self.initial_cost, self.DT, self.ctrl_cmds)
+            cost_g = header.utils.compute_cost(phi, ranges, self.init_d, self.auvID)
+            d_target = (np.sqrt((x[0]-s[0])**2+(x[1]-s[1])**2))#/self.init_d
             w_d = header.utils.sig(d_target,self.init_d,self.alpha)
+            #w_d = 0
             w_g = header.utils.sig(d_target,self.init_d,-self.alpha)
+            w_g = 1
             
-            penalty, penalty_d = heuristicPenalty(choices, tmp_pi_bar, tmp_s, self.initial_cost, self.DT)
             
             # weights should be between 0 an 1 and change according to the distance.
             # other option is to make the reweighted estimation w.r.t. the range.
             # in theory you weight differently the measures in order to give more importance to near measures0
+            '''if self.auvID == 1:
+                print(cost_g)
+                print(d_target)
+                print(penalty)
+                print(penalty_d)'''
+            child_value = father_value + w_g*cost_g + w_d*d_target + penalty + penalty_d
 
-            child_value = father_value + w_g*cost_g + w_d*d_target + penalty +penalty_d
             
             # Branch the tree
             child = pybnb.Node()
@@ -192,7 +208,8 @@ class Simple(pybnb.Problem):
         return pi_bar_out, auvs_xy, ax, ay, ayaw
 
     def simulation(self, ctrl_input, x_hat, P, s_pose, sensors, ax, ay, v_n, DT, pi_bar, init_state):
-        
+        #if self.auvID == 2:
+        #    rospy.logwarn('AUV ID %s AT STAGE:%s with PI_BAR_IN: %s and SENSOR POSE: %s',self.auvID,len(self.choices), pi_bar, s_pose)
         # Temporal Variable
         j = 0, 0 #time and counter init
         meas_table = []
@@ -219,18 +236,50 @@ class Simple(pybnb.Problem):
         target.x = target.F*tmp
         s_pose = [ax[-1],ay[-1],ayaw]
         
+
         # Simulate measurements TODO: (REPRODUCE THE TDMA Sampling!!, not measure everything at the end)
         for i in range(self.auvNum):
             if self.auvID == i+1:
                 tmp = s_pose
+                ranges = np.sqrt((target.x[1]-tmp[1])**2+(target.x[0]-tmp[0])**2)
             else:
                 tmp = auvs_xy[i]
-            if np.sum(tmp) == 0.0 or self.auvID != (i+1):
+            if np.sum(tmp) == 0.0 and self.auvID != (i+1):
                 tmp = init_state[i]
+
+            '''if self.auvID == 2:
+                rospy.logwarn('AGENT POSE: %s',tmp)'''
             [measure_, rel_bearing_, meas_pos] = sensors[i].measureBearing(target.x[0],target.x[1],[tmp[0],tmp[1]],tmp[2])
             arr = [measure_,meas_pos[0],meas_pos[1]]
             meas_table.append(arr)
+
         # Compute the regressor according to measurements simulated
         estimator.computeState(meas_table)
+
+        '''if self.auvID == 2:
+
+            plt.plot(ax,ay,'xr')
+            plt.plot(s_pose[0],s_pose[1],'ob')
+            plt.plot(target.x[0], target.x[1],'ok')
             
-        return target.x, estimator.phi, estimator.y, s_pose, ax[-1], ay[-1], pi_bar_out
+            for i in range(self.auvNum):
+                pi_bar_j = pi_bar_out[i]
+                if self.auvID == i+1:
+                    tmp = s_pose
+                else:
+                    tmp = auvs_xy[i]
+                print('AUVS_XY',auvs_xy[i])
+                print('BOOLEAN',np.sum(tmp) == 0.0)
+                if np.sum(tmp) == 0.0 and self.auvID != (i+1):
+                    print('prova')
+                    tmp = init_state[i]
+                plt.plot(tmp[0],tmp[1],'om')
+                
+                plt.plot()
+            
+            plt.grid()
+            plt.axis('equal')
+            plt.show()
+            rospy.logwarn('AUV ID %s with PI_BAR_OUT: %s',self.auvID, pi_bar_out)'''
+
+        return target.x, estimator.phi, estimator.y, s_pose, ax[-1], ay[-1], pi_bar_out, ranges

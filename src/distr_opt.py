@@ -32,6 +32,36 @@ for i in range(len(policies_intent)):
         tmp.append(0.0)
     policies_intent[i] = tmp
 
+def adaptCtrlSet(old_ctrls,delta_u,count_low,count_max,u_max):
+    
+    for i in range(len(old_ctrls)):
+        if [0-(1e-3)] <=  np.abs(old_ctrls[i])-(1e-3) <= -u_max/(header.config.U/2):
+            count_low += 1 
+            if count_low == 3:
+                if u_max <= header.config.MIN:
+                    u_max = u_max
+                    count_low = 0
+                else:
+                    print('DECREASING K_MAX----------------------------')
+                    u_max  = u_max  - delta_u
+                    count_low = 0
+        elif np.abs(old_ctrls[i]) >= u_max :
+            count_max += 1
+            if count_max == 3:
+                if u_max >= header.config.MAX:
+                    u_max = u_max
+                    count_max = 0
+                else:
+                    print('INCREASING K_MAX++++++++++++++++++++++++++++')
+                    u_max  = u_max  + delta_u
+                    count_max = 0
+    count_low = 0
+    count_max = 0
+    old_ctrls = []
+    print('COUNT LOW-------------------------------',count_low)
+    print('COUNT MAX+++++++++++++++++++++++++++++++',count_max)
+    return old_ctrls, count_max, count_low, u_max
+
 def callbackTstate(data):
     global t_state
     t_state = data.data
@@ -69,7 +99,6 @@ def callbackInit1(data):
 def callbackInit2(data):
     global init_d
     init_d = data.data
-    #init_d = tmp[0]
 
 def shutdown_cllbk():
     global auvID, avg_time, avg_nodes
@@ -134,12 +163,22 @@ def main():
     while not rospy.is_shutdown():
 
         if t_state[0] != old_t_state[0] and t_state[0] != None:
+            pi_bar_in = []
+            s = []
+            x_hat = []
+            for i in range(len(policies_intent)):
+                pi_bar_in.append(policies_intent[i])
+            for i in range(len(t_state)):
+                x_hat.append(t_state[i])
+            for i in range(len(s_state)):
+                s.append(s_state[i])
+            
             if t_state[4] != -10**3:
             
                 rospy.loginfo('OPTIMIZATION ID %s STARTING with POLICIES of INTENT: %s , V_n: %s , Init d: %s',auvID,policies_intent,t_state[4],init_d[auvID-1])
-                problem = header.bnb.Simple(auvNum, auvID, t_state[0:4], s_state, ctrl_choices, policies_intent, init_state, init_d[auvID-1], t_state[4])
+                problem = header.bnb.Simple(auvNum, auvID, x_hat[0:4], s_state, ctrl_choices, pi_bar_in, init_state, init_d[auvID-1], x_hat[4])
                 solver = header.bnb.pybnb.Solver()
-                results = solver.solve(problem,queue_strategy="bound" ,node_limit=limit)# node_limit=limi #Uniform cost search con "objective"
+                results = solver.solve(problem,queue_strategy="bound",objective_stop=1,node_limit=limit)# node_limit=limi #Uniform cost search con "objective"
                                                                                         # objective_stop=90000,time_limit=5 - other queue strategies
                 best_node_states, wall_time, nodes = results.best_node.state, results.wall_time, results.nodes
                 avg_nodes.append(nodes)
@@ -147,44 +186,21 @@ def main():
                 output_policy = best_node_states[4]
                 msg = [s_state[0],s_state[1],s_state[2],t_state[4]]
 
-                for i in range(header.config.H+1):
-                    if i < header.config.H:
-                        msg.append(output_policy[i])#appendi la sequenza ottimale di controllo
-                    else:
-                        msg.append(0.0)
+                for i in range(header.config.H):
+                    msg.append(output_policy[i])
+
+                msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
                 pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
                 rospy.loginfo('OPTIMIZATION ID %s DONE! --> Output Policy: %s',auvID,msg)
 
                 old_ctrls.append(output_policy[0])
-                            
-                # Adapt online the heading changes: # TO DEBUG !!!!! OR TO TUNE PROPERLY -  in theory done to check
+
+                # Adapt online the heading changes: # TODO DEBUG !!!!! OR TO TUNE PROPERLY -  in theory done to check
                 if len(old_ctrls) == 3:
-                    for i in range(len(old_ctrls)):
-                        if [0-(1e-3)] <=  np.abs(old_ctrls[i])-(1e-3) <= header.config.u_max *2/(header.config.U):
-                            count_low += 1 
-                            if count_low == 3:
-                                if u_max <= header.config.MIN:
-                                    u_max = u_max
-                                    count_low = 0
-                                else:
-                                    print('DECREASING K_MAX----------------------------')
-                                    u_max  = u_max  - delta_u
-                                    count_low = 0
-                        elif np.abs(old_ctrls[i]) >= u_max :
-                            count_max += 1
-                            if count_max == 3:
-                                if u_max >= header.config.MAX:
-                                    u_max = u_max
-                                    count_max = 0
-                                else:
-                                    print('INCREASING K_MAX++++++++++++++++++++++++++++')
-                                    u_max  = u_max  + delta_u
-                                    count_max = 0
-                    count_low = 0
-                    count_max = 0
-                    old_ctrls = []
-                    print('COUNT LOW-------------------------------',count_low)
-                    print('COUNT MAX+++++++++++++++++++++++++++++++',count_max)
+                    old_ctrls, count_max, count_low, u_max = adaptCtrlSet(old_ctrls,delta_u,count_low,count_max,u_max)
+                    ctrl_cmd = [-u_max,-u_max*6/(header.config.U),-u_max*4/(header.config.U),0,
+                                    u_max*4/(header.config.U), u_max*6/(header.config.U), u_max] #set of control actions'''
+            
             elif t_state[4] == -10**3:
                 msg = [s_state[0],s_state[1],s_state[2],0.0]
 
