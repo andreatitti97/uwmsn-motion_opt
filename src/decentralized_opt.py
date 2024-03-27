@@ -362,11 +362,3 @@ def main():
 if __name__ == '__main__':
     
     main()
-
-
-
-'''np.savetxt(log_path+'/plot_cmds.txt',ctrl_plot)
-np.savetxt(log_path+'/t_est_x_opt.txt',t_est_x[0])
-np.savetxt(log_path+'/t_est_y_opt.txt',t_est_y[0])
-np.savetxt(log_path+'/s_state_x.txt',s_state_x)
-np.savetxt(log_path+'/s_state_y.txt',s_state_y)'''

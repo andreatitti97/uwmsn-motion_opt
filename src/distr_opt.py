@@ -224,34 +224,3 @@ def main():
 if __name__ == '__main__':
     
     main()
-
-'''if auvID == 1:
-
-        rospy.logwarn('OPTIMIZATION ID %s SENSOR POSE; %s',auvID,s_pose)
-        #rospy.logwarn('OPTIMIZATION ID %s [rx, ry, ryaw]; %s',auvID,[rx, ry, ryaw])
-        rospy.logwarn('AUV ID %s with AUVS_XY: %s',auvID,auvs_xy)
-        rospy.logwarn('AUV ID %s with MEAS_TABLE: %s',auvID, meas_table)
-        rospy.logwarn('AUV ID %s with PI_BAR_OUT: %s',auvID, pi_bar_out)
-        rospy.logwarn('AUV ID %s with INIT_STATE: %s',auvID, init_state)
-        rospy.logwarn('OPTIMIZATION ID %s WAYPOINTS POST updating path -> ax:(%s) ay:(%s)',auvID,ax,ay)
-    
-        plt.plot(s_pose[0],s_pose[1],'oy')
-        plt.plot(old_t[0],old_t[1],'ok')
-        plt.plot(target.x[0],target.x[1],'or')
-        plt.plot(ax,ay,'xr')
-
-        for i in range(len(auvs_xy)):
-            tmp = auvs_xy[i]
-            
-            if np.sum(tmp) != 0.0 and auvID != i+1:
-                plt.plot(tmp[0],tmp[1],'om')
-            else:
-                tmp = init_state[i]
-            
-                plt.plot(tmp[0],tmp[1],'om')
-                
-            tmp = init_state[i]
-            plt.plot(init_state[i,0],init_state[i,1],'og')
-        plt.grid()
-        plt.axis('equal')
-        plt.show()'''
