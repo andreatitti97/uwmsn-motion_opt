@@ -2,12 +2,10 @@
 import os, pathlib, importlib.util
 # Import math modules
 import numpy as np
-import matplotlib.pyplot as plt
 # Import ROS modules and Service
 import rospy
 from rospy_tutorials.msg import Floats
 from rospy.numpy_msg import numpy_msg
-from math import atan2
 
 # Load the header file as a Python module 
 pkg_directory = os.path.dirname(os.path.dirname(pathlib.Path(__file__).parent.resolve()))
@@ -156,6 +154,10 @@ def main():
     for i in range(header.config.H+1):
             limit += header.config.U**i
 
+    # Branch and Bound specs
+    bound_d = header.config.RANGE_TO_TARGET
+    bound_g = 1
+
     # Init publishers and subscribers
     pub_ctrl_policy = rospy.Publisher('/'+str(auvID)+'/ctrl_policy',numpy_msg(Floats),queue_size=100)
 
@@ -178,8 +180,8 @@ def main():
                 rospy.loginfo('OPTIMIZATION ID %s STARTING with POLICIES of INTENT: %s , V_n: %s , Init d: %s',auvID,policies_intent,t_state[4],init_d[auvID-1])
                 problem = header.bnb.Simple(auvNum, auvID, x_hat[0:4], s_state, ctrl_choices, pi_bar_in, init_state, init_d[auvID-1], x_hat[4])
                 solver = header.bnb.pybnb.Solver()
-                results = solver.solve(problem,queue_strategy="bound",objective_stop=1,node_limit=limit)# node_limit=limi #Uniform cost search con "objective"
-                                                                                        # objective_stop=90000,time_limit=5 - other queue strategies
+                results = solver.solve(problem,queue_strategy="bound",node_limit=limit)# node_limit=limi #Uniform cost search con "objective"
+                                                                #objective_stop=bound_d+bound_g,                        # objective_stop=90000,time_limit=5 - other queue strategies
                 best_node_states, wall_time, nodes = results.best_node.state, results.wall_time, results.nodes
                 avg_nodes.append(nodes)
                 avg_time.append(wall_time)
@@ -198,9 +200,8 @@ def main():
                 # Adapt online the heading changes: # TODO DEBUG !!!!! OR TO TUNE PROPERLY -  in theory done to check
                 if len(old_ctrls) == 3:
                     old_ctrls, count_max, count_low, u_max = adaptCtrlSet(old_ctrls,delta_u,count_low,count_max,u_max)
-                    ctrl_cmd = [-u_max,-u_max*6/(header.config.U),-u_max*4/(header.config.U),0,
-                                    u_max*4/(header.config.U), u_max*6/(header.config.U), u_max] #set of control actions'''
-            
+                    ctrl_choices = [-u_max,0,u_max]
+
             elif t_state[4] == -10**3:
                 msg = [s_state[0],s_state[1],s_state[2],0.0]
 
