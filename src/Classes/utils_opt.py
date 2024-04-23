@@ -46,5 +46,25 @@ def compute_cost2(phi):
 
 def sig(x,d_max,alpha):
 
-    return 1/(1 + np.exp(alpha*(-x+d_max/2)))
+    return 1/(1 + np.exp(alpha*(-x+(d_max-config.RANGE_TO_TARGET)/2)))
 
+def computePursuitVel(curr_est,s_pose,d_max):
+
+    predicted_pose = np.array(np.zeros(2))
+    predicted_pose[0] = curr_est[0] + config.DT*curr_est[2]
+    predicted_pose[1] = curr_est[1] + config.DT*curr_est[3]
+
+    eucl_dist = np.sqrt((predicted_pose[0]-s_pose[0])**2+(predicted_pose[1]-s_pose[1])**2)
+    epsi = config.RANGE_TO_TARGET #DISTANCA VOLUTA DAL TARGET
+    
+    alpha = 0.09
+    x = (eucl_dist-epsi)
+    
+    weigth = 1/(1 + np.exp(alpha*(-x+d_max/2))) #sigmoidal behaviour
+    #weigth = -alpha*x #linear behaviour
+    v_n = weigth*config.AUV_MAX_VEL
+    
+    if x < 1:
+        v_n = -10**3
+
+    return v_n

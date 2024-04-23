@@ -26,7 +26,7 @@ init_d = None
 
 for i in range(len(policies_intent)):
     tmp = []
-    for j in range((len(s_state)+1+header.config.H)):
+    for j in range((len(s_state)+((header.config.H+1)*2))):
         tmp.append(0.0)
     policies_intent[i] = tmp
 
@@ -182,16 +182,30 @@ def main():
                 solver = header.bnb.pybnb.Solver()
                 results = solver.solve(problem,queue_strategy="bound",node_limit=limit)# node_limit=limi #Uniform cost search con "objective"
                                                                 #objective_stop=bound_d+bound_g,                        # objective_stop=90000,time_limit=5 - other queue strategies
-                best_node_states, wall_time, nodes = results.best_node.state, results.wall_time, results.nodes
+                best_node_states, wall_time, nodes = results.best_node.state, results.wall_time, results.nodes#, results.ref_vels
                 avg_nodes.append(nodes)
                 avg_time.append(wall_time)
                 output_policy = best_node_states[4]
-                msg = [s_state[0],s_state[1],s_state[2],t_state[4]]
+                ref_vels = best_node_states[6]
+                print(best_node_states)
+                msg = [s_state[0],s_state[1],s_state[2]]
+                for i in range(header.config.H+1):
+                    msg.append(ref_vels[i]) # append the vels for complete policy of intent
+                
+                if -0.1 <= np.sum(output_policy) <= +0.1: #check if zig-zag trajectorys
+                    waypoints = []
+                    for i in range(len(output_policy)):
+                        waypoints.append(0)
+                else:
+                    waypoints = output_policy
 
                 for i in range(header.config.H):
-                    msg.append(output_policy[i])
-
+                    msg.append(waypoints[i])
+                
                 msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
+
+                
+
                 pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
                 rospy.loginfo('OPTIMIZATION ID %s DONE! --> Output Policy: %s',auvID,msg)
 
@@ -200,12 +214,12 @@ def main():
                 # Adapt online the heading changes: # TODO DEBUG !!!!! OR TO TUNE PROPERLY -  in theory done to check
                 if len(old_ctrls) == 3:
                     old_ctrls, count_max, count_low, u_max = adaptCtrlSet(old_ctrls,delta_u,count_low,count_max,u_max)
-                    ctrl_choices = [-u_max,0,u_max]
+                    #ctrl_choices = [-u_max,0,u_max] #uncomment for adpting control set
 
             elif t_state[4] == -10**3:
                 msg = [s_state[0],s_state[1],s_state[2],0.0]
 
-                for i in range(header.config.H+1):
+                for i in range(header.config.H*2+1):
                     
                     msg.append(0.0)
                 pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
