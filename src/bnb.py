@@ -139,22 +139,21 @@ class Simple(pybnb.Problem):
             penalty, penalty_d, penalty_abs = heuristicPenalty(self.ctrl_cmds[i], tmp_pi_bar, tmp_s, self.value, self.DT, self.ctrl_cmds, self.init_d, d_target)
             cost_g = 1/header.utils.compute_cost(phi)
             
-            print('cost_g',cost_g)
-            print('d_target',d_target)
-            w_d = 10*header.utils.sig(d_target,self.init_d,-self.alpha)
-            w_d = 20#3.5#2.5
+            w_d = header.utils.sig(d_target,self.init_d,-self.alpha)
+            w_d = 1.0#2.5#2.5#20#2.5
 
+            # IDEAL SCENARIO TOP PARAMS
             #IF w_d = 20 and w_g = 1/100 COMPLETE PURSUIT with FINAL ADJUSTMENTS for OPT GEOM
             #IF w_d = 1 and w_g = 1/10 OPT GEOM only
             # IF 2.5/3.5 and 1/10 OPTIMAL BEAVIOUR
             # TODO: TEST AGAIN COMBINED SIGOMIDS
             w_g = header.utils.sig(d_target,self.init_d,self.alpha) #geometry cost function more relevant in the proximity of the target
-            w_g = 1/10
-            w_g = 1/100
-            print('w_g*cost_g',w_g*cost_g)
-            print('w_d*d_target',w_d*d_target)
+            w_g = 1/10#1/10#1/100#1/10
+            
+            #print('w_g*cost_g',w_g*cost_g)
+            #print('w_d*d_target',w_d*d_target)
 
-            child_value = father_value + w_g*cost_g + w_d*d_target + penalty_d  + penalty_abs #+ penalty
+            child_value = father_value + w_g*cost_g + w_d*d_target + penalty_d  #+ penalty_abs #+ penalty
             #print('MAGNITUDE GEOM',w_g*cost_g)
             #print('MAGNITUDE DIST',w_d*d_target)
             # Branch the tree
