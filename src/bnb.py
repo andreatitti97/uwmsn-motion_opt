@@ -15,15 +15,19 @@ spec = importlib.util.spec_from_file_location("module.header", header_file+'/bnb
 header = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(header)
 
-def heuristicPenalty(choice, tmp_pi_bar, tmp_s, curren_cost, DT, ctrl_cmds, init_d, d_target):
+def heuristicPenalty(tmp_pi_bar, tmp_s, curren_cost, DT, init_d, x_hat):
 
-    penalty, penalty_d, penalty_abs = 0, 0, 0
+    penalty_d, penalty_abs = 0, 0
     d_max, d_min = header.config.max_distance, header.config.min_distance
-    delta_fd = 2*np.abs(ctrl_cmds[0])
-    tmp = []
 
-    for i in range(len(tmp_pi_bar)):
+    tmp = []
+    loops = len(tmp_pi_bar)
+    tmp_x_hat = x_hat
+    for i in range(loops):
         j_pi_bar = tmp_pi_bar[i]
+        tmp_x_hat[0] = tmp_x_hat[0]+DT*tmp_x_hat[2]
+        tmp_x_hat[1] = tmp_x_hat[1]+DT*tmp_x_hat[3]
+
         #TODO BETTER
         if len(j_pi_bar) == 3+(header.config.H+1)*2:
 
@@ -40,19 +44,17 @@ def heuristicPenalty(choice, tmp_pi_bar, tmp_s, curren_cost, DT, ctrl_cmds, init
             tmp_y = np.sin(j_pi_bar[2]+j_pi_bar[idx2])*j_pi_bar[3]*DT+j_pi_bar[1]
             tmp = np.sqrt((tmp_y-tmp_s[1])**2+(tmp_x-tmp_s[0])**2)
             
-            if tmp >= d_max:
-                penalty_d = -curren_cost/2
+            tmp_d_target = np.sqrt((tmp_x_hat[1]-tmp_s[1])**2+(tmp_x_hat[0]-tmp_s[0])**2)
+            #if tmp >= d_max:
+            #    penalty_d = -curren_cost/loops + penalty_d
             if tmp <= d_min:
-                penalty_d = -curren_cost/2
- 
-    if np.abs(choice) >= delta_fd:  
-        penalty = -curren_cost/2
-    
-    if d_target > init_d:
+                penalty_d = -curren_cost/loops + penalty_d
 
-        penalty_abs = -curren_cost/2
+            if tmp_d_target > init_d:
 
-    return penalty, penalty_d, penalty_abs
+                penalty_abs = -curren_cost/loops
+
+    return penalty_d, penalty_abs
 
 class Simple(pybnb.Problem):
     def __init__(self, auvNum, auvID, x_hat, s, ctrl_cmds, pi_bar, init_state, init_d, v_n = 0, cpf_control = []):
@@ -136,28 +138,23 @@ class Simple(pybnb.Problem):
             # Compute the cost functions
             father_value = self.value #THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENC
             d_target = 1/(np.sqrt((x[0]-s[0])**2+(x[1]-s[1])**2))
-            penalty, penalty_d, penalty_abs = heuristicPenalty(self.ctrl_cmds[i], tmp_pi_bar, tmp_s, self.value, self.DT, self.ctrl_cmds, self.init_d, d_target)
+            penalty_d, penalty_abs = heuristicPenalty(tmp_pi_bar, tmp_s, self.value, self.DT, self.init_d, x)
             cost_g = 1/header.utils.compute_cost(phi)
             
             w_d = header.utils.sig(d_target,self.init_d,-self.alpha)
-            w_d = 1.0#2.5#2.5#20#2.5
+            w_d = 10.0 #2.5
 
             # IDEAL SCENARIO TOP PARAMS
             #IF w_d = 20 and w_g = 1/100 COMPLETE PURSUIT with FINAL ADJUSTMENTS for OPT GEOM
             #IF w_d = 1 and w_g = 1/10 OPT GEOM only
             # IF 2.5/3.5 and 1/10 OPTIMAL BEAVIOUR
-            # TODO: TEST AGAIN COMBINED SIGOMIDS
+            
             w_g = header.utils.sig(d_target,self.init_d,self.alpha) #geometry cost function more relevant in the proximity of the target
-            w_g = 1/10#1/10#1/100#1/10
-            
-            #print('w_g*cost_g',w_g*cost_g)
-            #print('w_d*d_target',w_d*d_target)
+            w_g = 1/10 #1.0
 
-            child_value = father_value + w_g*cost_g + w_d*d_target + penalty_d  #+ penalty_abs #+ penalty
-            #print('MAGNITUDE GEOM',w_g*cost_g)
-            #print('MAGNITUDE DIST',w_d*d_target)
-            # Branch the tree
-            
+            child_value = father_value + w_g*cost_g + w_d*d_target + penalty_d  + penalty_abs #+ penalty
+
+            # Branch the tree            
             child = pybnb.Node()
             child.state = (x, tmp_s, child_value, self._bound, choices, tmp_pi_bar, tmp_ref_vels)
 

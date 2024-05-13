@@ -154,7 +154,7 @@ def main():
     for i in range(header.config.H+1):
             limit += header.config.U**i
 
-    # Branch and Bound specs
+    # Branch and Bound specs #TODO
     bound_d = header.config.RANGE_TO_TARGET
     bound_g = 1
 
@@ -187,7 +187,7 @@ def main():
                 avg_time.append(wall_time)
                 output_policy = best_node_states[4]
                 ref_vels = best_node_states[6]
-                print(best_node_states)
+                print(ref_vels)
                 msg = [s_state[0],s_state[1],s_state[2]]
                 for i in range(header.config.H+1):
                     msg.append(ref_vels[i]) # append the vels for complete policy of intent
@@ -204,10 +204,11 @@ def main():
                 
                 msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
 
-                
 
                 pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
-                rospy.loginfo('OPTIMIZATION ID %s DONE! --> Output Policy: %s',auvID,msg)
+                magenta = "\033[0;35m"
+                none = "\033[0m"
+                rospy.loginfo('%s OPTIMIZATION ID %s DONE! --> Output Policy: %s %s',magenta,auvID,msg,none)
 
                 old_ctrls.append(output_policy[0])
 
