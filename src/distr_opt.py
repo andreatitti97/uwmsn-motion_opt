@@ -10,7 +10,7 @@ from rospy.numpy_msg import numpy_msg
 # Load the header file as a Python module 
 pkg_directory = os.path.dirname(os.path.dirname(pathlib.Path(__file__).parent.resolve()))
 header_file = pkg_directory+'/uwmsn-motion_opt'+'/include'+'/uwmsn-motion_opt'
-log_path = pkg_directory+'/uwmsn-sim'+'/logs'
+log_path = pkg_directory+'/logs'
 
 spec = importlib.util.spec_from_file_location("module.header", header_file+'/distr_opt_h.py')
 header = importlib.util.module_from_spec(spec)
@@ -132,7 +132,8 @@ def main():
 
     # Node Init
     rospy.init_node('auv'+str(auvID)) #TO ADD debug prints --> log_level=rospy.DEBUG
-
+    cyan = "\033[0;36m"
+    none = "\033[0m"
     # ROS simulation parameters
     Hz = 1/(header.config.TIME_STEP) #NB: different from sampling rate for move things, this is ros rate   
     rate = rospy.Rate(Hz)
@@ -174,7 +175,7 @@ def main():
                 x_hat.append(t_state[i])
             for i in range(len(s_state)):
                 s.append(s_state[i])
-            
+            print('+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++',x_hat)
             if t_state[4] != -10**3:
             
                 rospy.loginfo('OPTIMIZATION ID %s STARTING with POLICIES of INTENT: %s , V_n: %s , Init d: %s',auvID,policies_intent,t_state[4],init_d[auvID-1])
@@ -187,7 +188,6 @@ def main():
                 avg_time.append(wall_time)
                 output_policy = best_node_states[4]
                 ref_vels = best_node_states[6]
-                print(ref_vels)
                 msg = [s_state[0],s_state[1],s_state[2]]
                 for i in range(header.config.H+1):
                     msg.append(ref_vels[i]) # append the vels for complete policy of intent
@@ -206,9 +206,7 @@ def main():
 
 
                 pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
-                magenta = "\033[0;35m"
-                none = "\033[0m"
-                rospy.loginfo('%s OPTIMIZATION ID %s DONE! --> Output Policy: %s %s',magenta,auvID,msg,none)
+                rospy.loginfo('%s OPTIMIZATION ID %s DONE! --> Output Policy: %s %s',cyan,auvID,msg,none)
 
                 old_ctrls.append(output_policy[0])
 

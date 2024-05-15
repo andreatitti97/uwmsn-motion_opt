@@ -2,6 +2,7 @@
 import os, pathlib, importlib.util
 # Import math modules
 import numpy as np
+from math import sqrt
 
 # Load the header file as a Python module 
 pkg_directory = os.path.dirname(os.path.dirname(os.path.dirname(pathlib.Path(__file__).parent.resolve())))
@@ -50,30 +51,26 @@ def sig(x,d_max,alpha):
 
 def computePursuitVel(curr_est,s_pose,d_max):
 
-    predicted_pose = np.array(np.zeros(2))
-    predicted_pose[0] = curr_est[0] + config.DT*curr_est[2]
-    predicted_pose[1] = curr_est[1] + config.DT*curr_est[3]
+    predicted_pose = [0,0]
+    
+    tmp_s_pose = [s_pose[0],s_pose[1],s_pose[2]]
+    tmp_curr_est = [curr_est[0],curr_est[1],curr_est[2],curr_est[3]]
+    
+    predicted_pose[0] = tmp_curr_est[0] + config.DT*tmp_curr_est[2]
+    predicted_pose[1] = tmp_curr_est[1] + config.DT*tmp_curr_est[3]
 
-    eucl_dist = np.sqrt((predicted_pose[0]-s_pose[0])**2+(predicted_pose[1]-s_pose[1])**2)
+    eucl_dist = np.sqrt((predicted_pose[0]-tmp_s_pose[0])**2+(predicted_pose[1]-tmp_s_pose[1])**2)
     epsi = config.RANGE_TO_TARGET #DISTANCA VOLUTA DAL TARGET
     
-    alpha = 0.09
     beta = 1/d_max #coeficente angolare retta per due punti m = y2-y1/x1-x2 
-    '''x = np.linspace(0,d_max)
-    plt.plot(x,1/(1 + np.exp(alpha*(-x+d_max/2))))
-    plt.plot(x,beta*x)
-    plt.grid()
-    plt.show()'''
     x = (eucl_dist-epsi)
-    #weigth = 1/(1 + np.exp(alpha*(-x+d_max/2))) #sigmoidal behaviour
-    #weigth = -alpha*x #linear behaviour
-    v_n = beta*x#weigth*config.AUV_MAX_VEL
-    
+    v_n = beta*x
+
     if config.TARGET_INIT[3] == 0:
-        if x < 1: #ONLY IF THE TARGET IS STATIC
+        if eucl_dist <= epsi: #ONLY IF THE TARGET IS STATIC
             v_n = -10**3
     if 1 < x < epsi:
-        v_n = np.sqrt((curr_est[2,0])**2+(curr_est[3,0])**2)
+        v_n = np.sqrt((tmp_curr_est[2])**2+(tmp_curr_est[3])**2)
     elif v_n > config.AUV_MAX_VEL:
         v_n = config.AUV_MAX_VEL
 

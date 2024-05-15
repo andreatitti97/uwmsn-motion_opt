@@ -9,13 +9,13 @@ import pybnb
 pkg_directory = os.path.dirname(os.path.dirname(pathlib.Path(__file__).parent.resolve()))
 
 header_file = pkg_directory+'/uwmsn-motion_opt'+'/include'+'/uwmsn-motion_opt'
-log_path = pkg_directory+'/uwmsn-sim'+'/logs'
+log_path = pkg_directory+'/logs'
 
 spec = importlib.util.spec_from_file_location("module.header", header_file+'/bnb_h.py')
 header = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(header)
 
-def heuristicPenalty(tmp_pi_bar, tmp_s, curren_cost, DT, init_d, x_hat):
+def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat):
 
     penalty_d, penalty_abs = 0, 0
     d_max, d_min = header.config.max_distance, header.config.min_distance
@@ -28,17 +28,10 @@ def heuristicPenalty(tmp_pi_bar, tmp_s, curren_cost, DT, init_d, x_hat):
         tmp_x_hat[0] = tmp_x_hat[0]+DT*tmp_x_hat[2]
         tmp_x_hat[1] = tmp_x_hat[1]+DT*tmp_x_hat[3]
 
-        #TODO BETTER
-        if len(j_pi_bar) == 3+(header.config.H+1)*2:
-
-            idx2 = 7#len(j_pi_bar)-(header.config.H+2)
-        elif len(j_pi_bar) == (3+(header.config.H+1)*2)-2:
-            idx2 = 6#len(j_pi_bar)-(header.config.H+1)
-        elif len(j_pi_bar) == (3+(header.config.H+1)*2)-4:
-            idx2 = 5#len(j_pi_bar)-(header.config.H)
-        else:
-            idx2 = 4
-
+       
+        H = int(((len(j_pi_bar) - 3)/2))
+        idx2 = 3 + H
+        
         if len(j_pi_bar) >= 5:
             tmp_x = np.cos(j_pi_bar[2]+j_pi_bar[idx2])*j_pi_bar[3]*DT+j_pi_bar[0]
             tmp_y = np.sin(j_pi_bar[2]+j_pi_bar[idx2])*j_pi_bar[3]*DT+j_pi_bar[1]
@@ -46,13 +39,13 @@ def heuristicPenalty(tmp_pi_bar, tmp_s, curren_cost, DT, init_d, x_hat):
             
             tmp_d_target = np.sqrt((tmp_x_hat[1]-tmp_s[1])**2+(tmp_x_hat[0]-tmp_s[0])**2)
             #if tmp >= d_max:
-            #    penalty_d = -curren_cost/loops + penalty_d
+            #    penalty_d = -init_cost/loops + penalty_d
             if tmp <= d_min:
-                penalty_d = -curren_cost/loops + penalty_d
+                penalty_d = -init_cost/loops + penalty_d
 
             if tmp_d_target > init_d:
 
-                penalty_abs = -curren_cost/loops
+                penalty_abs = -init_cost/loops
 
     return penalty_d, penalty_abs
 
@@ -83,7 +76,6 @@ class Simple(pybnb.Problem):
         self.initial_cost = -header.config.DELTA
         self.DT = header.config.DT
         self._bound = +inf #no bound for now, greedy search
-        self.alpha = 0.08 #param for sigmoid activation funct
         self.choices = []
 
         # Variables for path init
@@ -119,7 +111,7 @@ class Simple(pybnb.Problem):
         x_hat, s, pi_bar = self._x_hat, self._s, self.pi_bar
         
         tmp_v_n = header.utils.computePursuitVel(x_hat,s,self.init_d)
-
+        
         for i in range(header.config.U):
             
             
@@ -132,27 +124,24 @@ class Simple(pybnb.Problem):
             
             # If we reached the planning horizon we subtract the DELTA to stop the algorithm and choose only terminal nodes
             if len(choices) == header.config.H:
+
                 self.value = self.value - self.initial_cost ##THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENCE
                 #self._bound = self.value #- cost1 
 
             # Compute the cost functions
             father_value = self.value #THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENC
             d_target = 1/(np.sqrt((x[0]-s[0])**2+(x[1]-s[1])**2))
-            penalty_d, penalty_abs = heuristicPenalty(tmp_pi_bar, tmp_s, self.value, self.DT, self.init_d, x)
+            penalty_d, penalty_abs = heuristicPenalty(tmp_pi_bar, tmp_s, self.initial_cost, self.DT, self.init_d, x)
             cost_g = 1/header.utils.compute_cost(phi)
-            
-            w_d = header.utils.sig(d_target,self.init_d,-self.alpha)
-            w_d = 10.0 #2.5
 
-            # IDEAL SCENARIO TOP PARAMS
-            #IF w_d = 20 and w_g = 1/100 COMPLETE PURSUIT with FINAL ADJUSTMENTS for OPT GEOM
-            #IF w_d = 1 and w_g = 1/10 OPT GEOM only
-            # IF 2.5/3.5 and 1/10 OPTIMAL BEAVIOUR
-            
-            w_g = header.utils.sig(d_target,self.init_d,self.alpha) #geometry cost function more relevant in the proximity of the target
-            w_g = 1/10 #1.0
+            '''IDEAL SCENARIO TOP PARAMS
+            IF w_d = 20 and w_g = 1/100 COMPLETE PURSUIT with FINAL ADJUSTMENTS for OPT GEOM
+            IF w_d = 1 and w_g = 1/10 OPT GEOM only
+             BASELINA SETUP    IF 2.5/3.5 and 1/10 OPTIMAL BEAVIOUR'''
+            w_d = 1.0
+            w_g = 1.0
 
-            child_value = father_value + w_g*cost_g + w_d*d_target + penalty_d  + penalty_abs #+ penalty
+            child_value = father_value + w_g*cost_g/100 + w_d*d_target + penalty_d  + penalty_abs #+ penalty
 
             # Branch the tree            
             child = pybnb.Node()
@@ -166,16 +155,8 @@ class Simple(pybnb.Problem):
             j_pi_bar = pi_bar[i]
             out = []
 
-            #TODO BETTER
-            if len(j_pi_bar) == 3+(header.config.H+1)*2:
-
-                idx2 = 7#len(j_pi_bar)-(header.config.H+2)
-            elif len(j_pi_bar) == (3+(header.config.H+1)*2)-2:
-                idx2 = 6#len(j_pi_bar)-(header.config.H+1)
-            elif len(j_pi_bar) == (3+(header.config.H+1)*2)-4:
-                idx2 = 5#len(j_pi_bar)-(header.config.H)
-            else:
-                idx2 = 4
+            H = int(((len(j_pi_bar) - 3)/2))
+            idx2 = 3 + H
 
             if np.sum(j_pi_bar) != 0 or self.auvID == i+1:
                 if self.auvID == i+1:
@@ -217,7 +198,7 @@ class Simple(pybnb.Problem):
         j = 0, 0 #time and counter init
         meas_table = []
 
-        # Init classes for tracker and target
+        # Init classes for tracker and target and propagate target estimation
         target = header.target_module.Target(x_hat, DT, P)
         estimator = header.estimator_module.Estimation()
 
@@ -231,12 +212,6 @@ class Simple(pybnb.Problem):
         
         # Propagate the AUVs state
         pi_bar_out, auvs_xy, s_pose = self.beliefPropagation(pi_bar, auvs_xy, ctrl_input, s_pose, v_n, DT)
-            
-        # Propagate target state estimation and update i-th AUV pose
-        tmp = np.zeros((4,1))
-        for j in range(4):  
-            tmp[j]=target.x[j]
-        target.x = target.F*tmp
         
         # Simulate measurements for cost function computation
         for i in range(self.auvNum):
@@ -244,7 +219,8 @@ class Simple(pybnb.Problem):
                 tmp = s_pose
             else:
                 tmp = auvs_xy[i]
-            if np.sum(tmp) == 0.0 and self.auvID != (i+1):
+            #print('------------------------------------------------------------------------------------init state',tmp)
+            if np.sum(tmp[0:3]) == 0.0 and self.auvID != (i+1):
                 tmp = init_state[i]
 
             [measure_, rel_bearing_, meas_pos] = sensors[i].measureBearing(target.x[0],target.x[1],[tmp[0],tmp[1]],tmp[2])
