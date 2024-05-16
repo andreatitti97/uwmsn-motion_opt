@@ -153,7 +153,7 @@ def main():
     ctrl_choices = header.config.ctrl_cmd
     limit = 0.0# Compute nodes limit according to RHC with finite memory
     for i in range(header.config.H+1):
-            limit += header.config.U**i
+        limit += header.config.U**i
 
     # Branch and Bound specs #TODO
     bound_d = header.config.RANGE_TO_TARGET
