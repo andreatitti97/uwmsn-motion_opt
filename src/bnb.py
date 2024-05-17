@@ -15,9 +15,9 @@ spec = importlib.util.spec_from_file_location("module.header", header_file+'/bnb
 header = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(header)
 
-def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat):
+def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat, des_range):
 
-    penalty_d_min, penalty_d_max, penalty_abs = 0, 0, 0
+    pen_dm, pen_dM, pen_abs = 0, 0, 0
     d_max, d_min = header.config.max_distance, header.config.min_distance
 
     tmp = []
@@ -39,18 +39,24 @@ def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat):
             tmp_d_target = np.sqrt((tmp_x_hat[1]-tmp_s[1])**2+(tmp_x_hat[0]-tmp_s[0])**2)
 
             if tmp >= d_max:
-                penalty_d_max = -init_cost/header.config.H
+                pen_dM = -(init_cost/header.config.H)/2
             if tmp <= d_min:
-                penalty_d_min = -init_cost/header.config.H
+                pen_dm = -(init_cost/header.config.H)/2
 
             if tmp_d_target > init_d:
 
-                penalty_abs = -init_cost/header.config.H
+                pen_abs = -(init_cost/header.config.H)/2
+            
+            if tmp_d_target <= des_range:
 
-    return penalty_d_min, penalty_d_max, penalty_abs
+                pen_abs = -(init_cost/header.config.H)
+            
+
+    return pen_dm, pen_dM, pen_abs
 
 class Simple(pybnb.Problem):
-    def __init__(self, auvNum, auvID, x_hat, s, ctrl_cmds, pi_bar, init_state, init_d, v_n = 0, cpf_control = []):
+    def __init__(self, auvNum, auvID, x_hat, s, ctrl_cmds,
+                    pi_bar, init_state, init_d, v_n = 0, cpf_control = []):
         
         inf = float("inf")
         
@@ -73,10 +79,10 @@ class Simple(pybnb.Problem):
         
         # Optimization Parameters
         self.value = 0 #initial value objective function 
-        self.initial_cost = header.config.DELTA
         self.DT = header.config.DT
         self._bound = +inf #no bound for now, greedy search
         self.choices = []
+        self.des_range = header.config.RANGE_TO_TARGET
 
         # Variables for path init
         tmp = np.zeros((self.auvNum,3))
@@ -100,11 +106,13 @@ class Simple(pybnb.Problem):
 
     def save_state(self, node):
         
-        node.state = (self._x_hat, self._s, self.value, self._bound, self.choices, self.pi_bar, self.ref_vels)
+        node.state = (self._x_hat, self._s, self.value, self._bound,
+                        self.choices, self.pi_bar, self.ref_vels)
 
     def load_state(self, node):
 
-        (self._x_hat, self._s, self.value, self._bound, self.choices, self.pi_bar, self.ref_vels) = node.state
+        (self._x_hat, self._s, self.value, self._bound,
+            self.choices, self.pi_bar, self.ref_vels) = node.state
 
     def branch(self): #durante il branch devi calcolare le varie realizzazioni quindi simuli qua
 
@@ -115,51 +123,39 @@ class Simple(pybnb.Problem):
         for i in range(header.config.U):
             
             
-            x, phi, tmp_s, tmp_pi_bar = self.simulation(self.ctrl_cmds[i], x_hat, self.P, s, self.sensors, tmp_v_n, self.DT, pi_bar, self.init_s_state)
+            x, phi, tmp_s, tmp_pi_bar = self.simulation(self.ctrl_cmds[i], 
+                                                        x_hat, self.P, s, self.sensors, 
+                                                        tmp_v_n, self.DT, pi_bar, self.init_s_state)
             
             # Update the sequence of control decisions
             tmp = [self.ctrl_cmds[i]]
             choices = self.choices + tmp
             tmp_ref_vels = self.ref_vels + [tmp_v_n]
             
-            '''# If we reached the planning horizon we subtract the DELTA to stop the algorithm and choose only terminal nodes
-            if len(choices) == (header.config.H+1):
-
-                father_value = cost + (header.config.H)*self.initial_cost ##THIS IS MANDATORY FOR ADDITIVE COST ALONG THE SEQUENCE
-                #self._bound = self.value #- cost1 
-            else:
-            # Compute the cost functions'''
-                
             father_value = cost
-
-            d_target = 1/(np.sqrt((x[0]-s[0])**2+(x[1]-s[1])**2))
-            penalty_d_min, penalty_d_max, penalty_abs = heuristicPenalty(tmp_pi_bar, tmp_s, cost, self.DT, self.init_d, x)
+            cost_d = self.des_range/((np.sqrt((x[0]-tmp_s[0])**2+(x[1]-tmp_s[1])**2)))#(1/((np.sqrt((d_vec[0])**2+(d_vec[1])**2))))   
             cost_g = 1/header.utils.compute_cost(phi)
 
-            '''IDEAL SCENARIO TOP PARAMS
-            IF w_d = 20 and w_g = 1/100 COMPLETE PURSUIT with FINAL ADJUSTMENTS for OPT GEOM
-            IF w_d = 1 and w_g = 1/10 OPT GEOM only
-             BASELINA SETUP    IF 2.5/3.5 and 1/10 OPTIMAL BEAVIOUR'''
-            w_d = 1.0
-            w_g = 1.0
-                       
-
-            child_value = father_value + w_g*cost_g/100 + w_d*d_target + penalty_d_max+ penalty_d_min  + penalty_abs #+ penalty
+            pen_dm, pen_dM, pen_abs = heuristicPenalty(tmp_pi_bar, tmp_s,
+                                                        cost, self.DT, 
+                                                        self.init_d, x, self.des_range)
+                                   
+            child_value = father_value + cost_g + cost_d + pen_dM + pen_dm + pen_abs
             
             if self.auvID == 1:
                 print('--------------------HORIZON',len(choices))
                 print('----------------------------------------self.value',self.value)
                 print('--------------------father value',father_value)
-                print('penalty_d_min',penalty_d_min)
-                print('penalty_d_max',penalty_d_max)
-                print('penalty_abs',penalty_abs)
-                print('w_g*cost_g',w_g*cost_g/100)
-                print('w_d*cost_d',w_d*d_target)
+                print('pen_dm',pen_dm)
+                print('pen_dM',pen_dM)
+                print('pen_abs',pen_abs)
+                print('w_g*cost_g',cost_g)
+                print('w_d*cost_d',cost_d)
                 print('--------------------------------------------child_value',child_value)
             # Branch the tree            
             child = pybnb.Node()
             child.state = (x, tmp_s, child_value, self._bound, choices, tmp_pi_bar, tmp_ref_vels)
-
+            
             yield child
 
     def beliefPropagation(self, pi_bar,auvs_xy,ctrl_input,s_pose,v_n,DT):
@@ -224,7 +220,8 @@ class Simple(pybnb.Problem):
                 auvs_xy[i].append(0.0)
         
         # Propagate the AUVs state
-        pi_bar_out, auvs_xy, s_pose = self.beliefPropagation(pi_bar, auvs_xy, ctrl_input, s_pose, v_n, DT)
+        pi_bar_out, auvs_xy, s_pose = self.beliefPropagation(pi_bar,
+                                                                auvs_xy, ctrl_input, s_pose, v_n, DT)
         
         # Simulate measurements for cost function computation
         for i in range(self.auvNum):
