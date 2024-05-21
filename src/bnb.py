@@ -57,9 +57,7 @@ def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat, des_range)
 class Simple(pybnb.Problem):
     def __init__(self, auvNum, auvID, x_hat, s, ctrl_cmds,
                     pi_bar, init_state, init_d, v_n = 0, cpf_control = []):
-        
-        inf = float("inf")
-        
+               
         # Basic parameters initialization
         self.auvNum = auvNum
         self.auvID = auvID
@@ -80,9 +78,46 @@ class Simple(pybnb.Problem):
         # Optimization Parameters
         self.value = 0 #initial value objective function 
         self.DT = header.config.DT
-        self._bound = +inf #no bound for now, greedy search
         self.choices = []
         self.des_range = header.config.RANGE_TO_TARGET
+        stage_bound = 0
+        for i in range(header.config.H):
+            tmp1 = s[0] + np.cos(s[2])*v_n*self.DT
+            tmp2 = s[1] + np.cos(s[2])*v_n*self.DT
+            s_hat = [tmp1,tmp2]
+            stage_bound += self.des_range/np.sqrt((s_hat[0]-x_hat[0])**2+(s_hat[1]-x_hat[1])**2)
+
+        meas_table = []
+        for i in range(int(auvNum)):
+            measure_ = 0
+            if self.auvID == i+1:
+                [measure_, rel_bearing_, meas_pos] = sensors[0].measureBearing(x_hat[0],x_hat[1],
+                                                                       [s[0],s[1]],s[2])
+            else:
+                j_pi_bar = pi_bar[i]
+                if np.sum(j_pi_bar) != 0:
+                    [measure_, rel_bearing_, meas_pos] = sensors[i].measureBearing(x_hat[0],x_hat[1],
+                                                                                  [j_pi_bar[0],j_pi_bar[1]],j_pi_bar[2])
+            if measure_ != 0:
+                arr = [measure_,meas_pos[0],meas_pos[1]]
+                meas_table.append(arr)
+
+        # Compute the regressor according to measurements simulated
+        estimator = header.estimator_module.Estimation()
+
+        if len(meas_table) == auvNum:
+            estimator.computeState(meas_table)
+            if header.utils.compute_cost(estimator.phi) <= 4:
+                cost_g = 1/4
+            else:
+                cost_g = 1/2
+        else:
+            cost_g = 1/5
+
+        
+        self._bound = stage_bound + (cost_g*header.config.H) + 1#realistic value for geometry
+        '''inf = float("inf")
+        self._bound = inf #greedy search'''
 
         # Variables for path init
         tmp = np.zeros((self.auvNum,3))
@@ -94,7 +129,7 @@ class Simple(pybnb.Problem):
         self.v_n = v_n
         self.ref_vels = [self.v_n]
 
-    # Required methods for grapth generation and searching
+    # Required methods for graph generation and searching
     def sense(self):
         return pybnb.maximize
 
@@ -133,7 +168,7 @@ class Simple(pybnb.Problem):
             tmp_ref_vels = self.ref_vels + [tmp_v_n]
             
             father_value = cost
-            cost_d = self.des_range/((np.sqrt((x[0]-tmp_s[0])**2+(x[1]-tmp_s[1])**2)))#(1/((np.sqrt((d_vec[0])**2+(d_vec[1])**2))))   
+            cost_d = self.des_range/((np.sqrt((x[0]-tmp_s[0])**2+(x[1]-tmp_s[1])**2)))  
             cost_g = 1/header.utils.compute_cost(phi)
 
             pen_dm, pen_dM, pen_abs = heuristicPenalty(tmp_pi_bar, tmp_s,
@@ -142,7 +177,7 @@ class Simple(pybnb.Problem):
                                    
             child_value = father_value + cost_g + cost_d + pen_dM + pen_dm + pen_abs
             
-            if self.auvID == 1:
+            if self.auvID == 10:
                 print('--------------------HORIZON',len(choices))
                 print('----------------------------------------self.value',self.value)
                 print('--------------------father value',father_value)
@@ -153,8 +188,15 @@ class Simple(pybnb.Problem):
                 print('w_d*cost_d',cost_d)
                 print('--------------------------------------------child_value',child_value)
             # Branch the tree            
+            if len(choices) == header.config.H:
+                child_value = child_value + 1
+
+            if self._bound < self.value:
+                bound = self.value
+            else:
+                bound = self._bound
             child = pybnb.Node()
-            child.state = (x, tmp_s, child_value, self._bound, choices, tmp_pi_bar, tmp_ref_vels)
+            child.state = (x, tmp_s, child_value, bound, choices, tmp_pi_bar, tmp_ref_vels)
             
             yield child
 
@@ -168,8 +210,7 @@ class Simple(pybnb.Problem):
             idx2 = 3 + H
 
             if np.sum(j_pi_bar) != 0 or self.auvID == i+1:
-                if self.auvID == i+1:
-            # Compute the path of the i-th AUV acoording to the choosen command
+                if self.auvID == i+1: # Compute the path of the i-th AUV acoording to the choosen command
                     
                     ax = np.cos(s_pose[2]+ctrl_input)*v_n*DT+s_pose[0]
                     ay = np.sin(s_pose[2]+ctrl_input)*v_n*DT+s_pose[1]
@@ -185,7 +226,6 @@ class Simple(pybnb.Problem):
                 if len(j_pi_bar) > 3:#remove related ref vel
                     j_pi_bar = np.delete(j_pi_bar,3)
                 
-                
                 for j in range(len(j_pi_bar[3:len(j_pi_bar)])):
                     out.append(j_pi_bar[j+3])
                 
@@ -198,13 +238,11 @@ class Simple(pybnb.Problem):
                     out.append(0.0)
             pi_bar_out.append(out)
             
-        #print('pi bar put',pi_bar_out)
         return pi_bar_out, auvs_xy, [ax, ay, s_pose[2]+ctrl_input]
 
     def simulation(self, ctrl_input, x_hat, P, s_pose, sensors, v_n, DT, pi_bar, init_state):
        
-        # Temporal Variable
-        j = 0, 0 #time and counter init
+        # Init data structures
         meas_table = []
 
         # Init classes for tracker and target and propagate target estimation
@@ -220,8 +258,8 @@ class Simple(pybnb.Problem):
                 auvs_xy[i].append(0.0)
         
         # Propagate the AUVs state
-        pi_bar_out, auvs_xy, s_pose = self.beliefPropagation(pi_bar,
-                                                                auvs_xy, ctrl_input, s_pose, v_n, DT)
+        pi_bar_out, auvs_xy, s_pose = self.beliefPropagation(pi_bar,auvs_xy, ctrl_input,
+                                                            s_pose, v_n, DT)
         
         # Simulate measurements for cost function computation
         for i in range(self.auvNum):
@@ -229,11 +267,11 @@ class Simple(pybnb.Problem):
                 tmp = s_pose
             else:
                 tmp = auvs_xy[i]
-            #print('------------------------------------------------------------------------------------init state',tmp)
             if np.sum(tmp[0:3]) == 0.0 and self.auvID != (i+1):
                 tmp = init_state[i]
 
-            [measure_, rel_bearing_, meas_pos] = sensors[i].measureBearing(target.x[0],target.x[1],[tmp[0],tmp[1]],tmp[2])
+            [measure_, rel_bearing_, meas_pos] = sensors[i].measureBearing(target.x[0],target.x[1],
+                                                                           [tmp[0],tmp[1]],tmp[2])
             arr = [measure_,meas_pos[0],meas_pos[1]]
             meas_table.append(arr)
 

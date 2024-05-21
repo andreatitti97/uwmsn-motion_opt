@@ -30,35 +30,54 @@ for i in range(len(policies_intent)):
         tmp.append(0.0)
     policies_intent[i] = tmp
 
-def adaptCtrlSet(old_ctrls,delta_u,count_low,count_max,u_max):
-    
-    for i in range(len(old_ctrls)):
-        if [0-(1e-3)] <=  np.abs(old_ctrls[i])-(1e-3) <= -u_max/(header.config.U/2):
+def frbdDcsMtd(output_policy):
+    # Forbidden Decision Method
+    if -0.1 <= np.sum(output_policy) <= +0.1: #check if zig-zag trajectorys
+        waypoints = []
+        for i in range(len(output_policy)):
+            waypoints.append(0)
+    else:
+        waypoints = output_policy
+    return waypoints
+
+def adptCtrlSet(old_ctrls,ctrl_set,count_low,count_max,u_max):
+
+    U, loops = len(ctrl_set), len(old_ctrls)
+    delta_u = header.config.delta_u
+    for i in range(loops):
+        
+        idx = ctrl_set.index(min(ctrl_set))
+        if [0-(1e-3)] <=  np.abs(old_ctrls[i]) <= ctrl_set[idx+1]+(1e-3):
             count_low += 1 
             if count_low == 3:
                 if u_max <= header.config.MIN:
                     u_max = u_max
                     count_low = 0
                 else:
-                    print('DECREASING K_MAX----------------------------')
                     u_max  = u_max  - delta_u
                     count_low = 0
-        elif np.abs(old_ctrls[i]) >= u_max :
+                    rospy.logwarn('|---- Decreasing u_max (deg) --> %s',u_max)
+                    
+        elif np.abs(old_ctrls[i]) >= u_max-(1e-3):
             count_max += 1
             if count_max == 3:
                 if u_max >= header.config.MAX:
                     u_max = u_max
                     count_max = 0
                 else:
-                    print('INCREASING K_MAX++++++++++++++++++++++++++++')
                     u_max  = u_max  + delta_u
                     count_max = 0
-    count_low = 0
-    count_max = 0
-    old_ctrls = []
-    print('COUNT LOW-------------------------------',count_low)
-    print('COUNT MAX+++++++++++++++++++++++++++++++',count_max)
-    return old_ctrls, count_max, count_low, u_max
+                    rospy.logwarn('|---- Increasing u_max (deg) --> %s',u_max)
+                    
+    if U == 7:
+        ctrl_set = [-u_max,-u_max*2/((U-1)/2),-u_max/((U-1)/2),0,
+                    u_max/((U-1)/2), u_max*2/((U-1)/2), u_max] #set of control actions
+    elif U == 5:
+        ctrl_set = [-u_max,-u_max/2,0,u_max/2,u_max] #set of control actions
+    else:
+        ctrl_set = [-u_max,0,u_max]
+    
+    return ctrl_set, count_max, count_low, u_max
 
 def callbackTstate(data):
     global t_state
@@ -150,14 +169,10 @@ def main():
     u_max = header.config.u_max
     delta_u = header.config.delta_u
     
-    ctrl_choices = header.config.ctrl_cmd
+    ctrl_set = header.config.ctrl_cmd
     limit = 0.0# Compute nodes limit according to RHC with finite memory
     for i in range(header.config.H+1):
         limit += header.config.U**i
-
-    # Branch and Bound specs #TODO
-    bound_d = header.config.RANGE_TO_TARGET
-    bound_g = 1
 
     # Init publishers and subscribers
     pub_ctrl_policy = rospy.Publisher('/'+str(auvID)+'/ctrl_policy',numpy_msg(Floats),queue_size=100)
@@ -166,56 +181,52 @@ def main():
     while not rospy.is_shutdown():
 
         if t_state[0] != old_t_state[0] and t_state[0] != None:
-            pi_bar_in = []
-            s = []
-            x_hat = []
+            pi_bar_in, s, x_hat = [], [], []
+
             for i in range(len(policies_intent)):
                 pi_bar_in.append(policies_intent[i])
             for i in range(len(t_state)):
                 x_hat.append(t_state[i])
             for i in range(len(s_state)):
                 s.append(s_state[i])
-            print('+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++',x_hat)
+
             if t_state[4] != -10**3:
-            
-                rospy.loginfo('OPTIMIZATION ID %s STARTING with POLICIES of INTENT: %s , V_n: %s , Init d: %s',auvID,policies_intent,t_state[4],init_d[auvID-1])
-                problem = header.bnb.Simple(auvNum, auvID, x_hat[0:4], s_state, ctrl_choices, pi_bar_in, init_state, init_d[auvID-1], x_hat[4])
+                # Initialize the problem
+                problem = header.bnb.Simple(auvNum, auvID, x_hat[0:4], s_state, ctrl_set,
+                                            pi_bar_in, init_state, init_d[auvID-1], x_hat[4])
+                # Solve the optimization problem
                 solver = header.bnb.pybnb.Solver()
-                results = solver.solve(problem,queue_strategy="bound",node_limit=limit)# node_limit=limi #Uniform cost search con "objective"
-                                                                #objective_stop=bound_d+bound_g,                        # objective_stop=90000,time_limit=5 - other queue strategies
-                best_node_states, wall_time, nodes = results.best_node.state, results.wall_time, results.nodes#, results.ref_vels
-                avg_nodes.append(nodes)
-                avg_time.append(wall_time)
-                output_policy = best_node_states[4]
-                ref_vels = best_node_states[6]
+                # Store the results
+                results = solver.solve(problem,queue_strategy="fifo",
+                                       node_limit=limit,relative_gap=0.1)
+                        #objective_stop=bound_d+bound_g, time_limit=5 - other queue strategies
+                best_node_states, wall_time, nodes = results.best_node.state, results.wall_time, results.nodes
+                avg_nodes.append(nodes), avg_time.append(wall_time)
+                output_policy, ref_vels  = best_node_states[4], best_node_states[6]
+                
+                #Formatting the results according to the communication protocol
                 msg = [s_state[0],s_state[1],s_state[2]]
                 for i in range(header.config.H+1):
                     msg.append(ref_vels[i]) # append the vels for complete policy of intent
-                
-                if -0.1 <= np.sum(output_policy) <= +0.1: #check if zig-zag trajectorys
-                    waypoints = []
-                    for i in range(len(output_policy)):
-                        waypoints.append(0)
-                else:
-                    waypoints = output_policy
-
+                # Apply the Forbidden Decision Method
+                waypoints = frbdDcsMtd(output_policy)
                 for i in range(header.config.H):
-                    msg.append(waypoints[i])
-                
+                    msg.append(waypoints[i])               
                 msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
 
-
+                # Ros pub
                 pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
                 rospy.loginfo('%s OPTIMIZATION ID %s DONE! --> Output Policy: %s %s',cyan,auvID,msg,none)
-
+                
+                # Adapt Online ctrl set
                 old_ctrls.append(output_policy[0])
-
-                # Adapt online the heading changes: # TODO DEBUG !!!!! OR TO TUNE PROPERLY -  in theory done to check
+                # Adapt online the heading changes
                 if len(old_ctrls) == 3:
-                    old_ctrls, count_max, count_low, u_max = adaptCtrlSet(old_ctrls,delta_u,count_low,count_max,u_max)
-                    #ctrl_choices = [-u_max,0,u_max] #uncomment for adpting control set
+                    ctrl_set, count_max, count_low, u_max = adptCtrlSet(old_ctrls,ctrl_set,
+                                                                        count_low,count_max,u_max)
+                    old_ctrls = []
 
-            elif t_state[4] == -10**3:
+            elif t_state[4] == -10**3: #in case of a static target only
                 msg = [s_state[0],s_state[1],s_state[2],0.0]
 
                 for i in range(header.config.H*2+1):
