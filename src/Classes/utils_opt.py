@@ -60,18 +60,13 @@ def computePursuitVel(curr_est,s_pose,d_max):
     predicted_pose[1] = tmp_curr_est[1] + config.DT*tmp_curr_est[3]
 
     eucl_dist = np.sqrt((predicted_pose[0]-tmp_s_pose[0])**2+(predicted_pose[1]-tmp_s_pose[1])**2)
-    epsi = config.RANGE_TO_TARGET #DISTANCA VOLUTA DAL TARGET
+    epsi = config.RANGE_TO_TARGET #DISTANZA VOLUTA DAL TARGET
     
     beta = 1/d_max #coeficente angolare retta per due punti m = y2-y1/x1-x2 
     x = (eucl_dist-epsi)
-    v_n = beta*x
+    v_n = beta*x + np.sqrt((tmp_curr_est[2])**2+(tmp_curr_est[3])**2)
 
-    if config.TARGET_INIT[3] == 0:
-        if eucl_dist <= epsi: #ONLY IF THE TARGET IS STATIC
-            v_n = -10**3
-    if 1 < x < epsi:
-        v_n = np.sqrt((tmp_curr_est[2])**2+(tmp_curr_est[3])**2)
-    elif v_n > config.AUV_MAX_VEL:
+    if v_n > config.AUV_MAX_VEL:#saturate desired vel
         v_n = config.AUV_MAX_VEL
 
     return v_n

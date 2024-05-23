@@ -197,9 +197,9 @@ def main():
                 # Solve the optimization problem
                 solver = header.bnb.pybnb.Solver()
                 # Store the results
-                results = solver.solve(problem,queue_strategy="fifo",
-                                       node_limit=limit,relative_gap=0.1)
-                        #objective_stop=bound_d+bound_g, time_limit=5 - other queue strategies
+                results = solver.solve(problem,queue_strategy="breadth",
+                                       node_limit=limit,relative_gap=0.001)
+                        
                 best_node_states, wall_time, nodes = results.best_node.state, results.wall_time, results.nodes
                 avg_nodes.append(nodes), avg_time.append(wall_time)
                 output_policy, ref_vels  = best_node_states[4], best_node_states[6]

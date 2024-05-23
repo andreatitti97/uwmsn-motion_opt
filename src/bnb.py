@@ -15,7 +15,7 @@ spec = importlib.util.spec_from_file_location("module.header", header_file+'/bnb
 header = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(header)
 
-def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat, des_range):
+def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat, des_range, auvID):
 
     pen_dm, pen_dM, pen_abs = 0, 0, 0
     d_max, d_min = header.config.max_distance, header.config.min_distance
@@ -38,15 +38,19 @@ def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat, des_range)
             tmp = np.sqrt((tmp_y-tmp_s[1])**2+(tmp_x-tmp_s[0])**2)
             tmp_d_target = np.sqrt((tmp_x_hat[1]-tmp_s[1])**2+(tmp_x_hat[0]-tmp_s[0])**2)
 
-            if tmp >= d_max:
-                pen_dM = -(init_cost/header.config.H)/2
-            if tmp <= d_min:
-                pen_dm = -(init_cost/header.config.H)/2
+            # TODO: Generalize the formula
+            if (auvID == 1 and i == 1) or (auvID == 2 and i != 1) or (auvID == 3 and i == 1):
+            
+                if tmp >= d_max:
+                    pen_dM = -(init_cost/header.config.H)
+                if tmp <= d_min:
+                    pen_dm = -(init_cost/header.config.H)
 
+            # DON T GO AWAY AFTER DETECTION
             if tmp_d_target > init_d:
 
-                pen_abs = -(init_cost/header.config.H)/2
-            
+                pen_abs = -(init_cost/header.config.H)
+            # DON'T CONVERGE COMPLETELY TO THE TARGET 
             if tmp_d_target <= des_range:
 
                 pen_abs = -(init_cost/header.config.H)
@@ -80,45 +84,9 @@ class Simple(pybnb.Problem):
         self.DT = header.config.DT
         self.choices = []
         self.des_range = header.config.RANGE_TO_TARGET
-        stage_bound = 0
-        for i in range(header.config.H):
-            tmp1 = s[0] + np.cos(s[2])*v_n*self.DT
-            tmp2 = s[1] + np.cos(s[2])*v_n*self.DT
-            s_hat = [tmp1,tmp2]
-            stage_bound += self.des_range/np.sqrt((s_hat[0]-x_hat[0])**2+(s_hat[1]-x_hat[1])**2)
-
-        meas_table = []
-        for i in range(int(auvNum)):
-            measure_ = 0
-            if self.auvID == i+1:
-                [measure_, rel_bearing_, meas_pos] = sensors[0].measureBearing(x_hat[0],x_hat[1],
-                                                                       [s[0],s[1]],s[2])
-            else:
-                j_pi_bar = pi_bar[i]
-                if np.sum(j_pi_bar) != 0:
-                    [measure_, rel_bearing_, meas_pos] = sensors[i].measureBearing(x_hat[0],x_hat[1],
-                                                                                  [j_pi_bar[0],j_pi_bar[1]],j_pi_bar[2])
-            if measure_ != 0:
-                arr = [measure_,meas_pos[0],meas_pos[1]]
-                meas_table.append(arr)
-
-        # Compute the regressor according to measurements simulated
-        estimator = header.estimator_module.Estimation()
-
-        if len(meas_table) == auvNum:
-            estimator.computeState(meas_table)
-            if header.utils.compute_cost(estimator.phi) <= 4:
-                cost_g = 1/4
-            else:
-                cost_g = 1/2
-        else:
-            cost_g = 1/5
-
+        self.inf = float("inf")
+        self._bound = self.inf #greedy search'''
         
-        self._bound = stage_bound + (cost_g*header.config.H) + 1#realistic value for geometry
-        '''inf = float("inf")
-        self._bound = inf #greedy search'''
-
         # Variables for path init
         tmp = np.zeros((self.auvNum,3))
         for i in range(len(tmp)):
@@ -173,7 +141,7 @@ class Simple(pybnb.Problem):
 
             pen_dm, pen_dM, pen_abs = heuristicPenalty(tmp_pi_bar, tmp_s,
                                                         cost, self.DT, 
-                                                        self.init_d, x, self.des_range)
+                                                        self.init_d, x, self.des_range, self.auvID)
                                    
             child_value = father_value + cost_g + cost_d + pen_dM + pen_dm + pen_abs
             
@@ -187,16 +155,18 @@ class Simple(pybnb.Problem):
                 print('w_g*cost_g',cost_g)
                 print('w_d*cost_d',cost_d)
                 print('--------------------------------------------child_value',child_value)
-            # Branch the tree            
+            # Compute the bound according to the proposed algorithm
             if len(choices) == header.config.H:
                 child_value = child_value + 1
+                
+                if self._bound == +self.inf:
+                    self._bound = child_value
 
-            if self._bound < self.value:
-                bound = self.value
-            else:
-                bound = self._bound
+                if child_value >= self._bound:
+                    self._bound = child_value
+            # Branch the tree         
             child = pybnb.Node()
-            child.state = (x, tmp_s, child_value, bound, choices, tmp_pi_bar, tmp_ref_vels)
+            child.state = (x, tmp_s, child_value, self._bound, choices, tmp_pi_bar, tmp_ref_vels)
             
             yield child
 
@@ -274,6 +244,13 @@ class Simple(pybnb.Problem):
                                                                            [tmp[0],tmp[1]],tmp[2])
             arr = [measure_,meas_pos[0],meas_pos[1]]
             meas_table.append(arr)
+
+        # YOU SHOULD CONSIDER ONLY YOUR NEIGHBOURs IN OPTIMIZING THE GEOMTRY
+        # TODO: Generalize the formula (brute version for 3 auv)
+        if self.auvID == 1:
+            meas_table.pop(2)
+        elif self.auvID == 3:
+            meas_table.pop(0)
 
         # Compute the regressor according to measurements simulated
         estimator.computeState(meas_table)
