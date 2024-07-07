@@ -161,6 +161,10 @@ def main():
     t, count1, count_low, count_max = 0,0,0,0
     
     avg_time, avg_nodes, old_ctrls = [],[],[]
+
+    pareto_data_c = []
+    pareto_data_g = []
+
     old_t_state = [None, None, None, None]
 
     # Load simulation parames from config file
@@ -202,8 +206,17 @@ def main():
                         
                 best_node_states, wall_time, nodes = results.best_node.state, results.wall_time, results.nodes
                 avg_nodes.append(nodes), avg_time.append(wall_time)
-                output_policy, ref_vels  = best_node_states[4], best_node_states[6]
+                output_policy, ref_vels, list_c, list_g  = best_node_states[4], best_node_states[6], best_node_states[7], best_node_states[8]
                 
+                '''for i in range(len(list_c)):
+                    pareto_data_c.append(list_c[i])
+                    pareto_data_g.append(list_g[i])'''
+                if auvID == 2:
+                    pareto_data_c.append(list_c[0])
+                    pareto_data_g.append(list_g[0])
+
+                    np.savetxt(log_path+'/list_c',pareto_data_c)
+                    np.savetxt(log_path+'/list_g',pareto_data_g)
                 #Formatting the results according to the communication protocol
                 msg = [s_state[0],s_state[1],s_state[2]]
                 for i in range(header.config.H+1):

@@ -15,48 +15,163 @@ spec = importlib.util.spec_from_file_location("module.header", header_file+'/bnb
 header = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(header)
 
+def alpha(f):
+    
+    return 0.11*(f**2/(1+f**2))+44*(f**2/(4100+f**2))+(2.75*(1e-4)*(f**2))+0.003
+
 def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat, des_range, auvID):
 
     pen_dm, pen_dM, pen_abs = 0, 0, 0
     d_max, d_min = header.config.max_distance, header.config.min_distance
-
+    acoustic_loss = alpha(header.config.f)
+    snr = []
     tmp = []
     loops = len(tmp_pi_bar)
     tmp_x_hat = x_hat
+
+    old_tmp_x = []
+    old_tmp_y = []
     for i in range(loops):
         j_pi_bar = tmp_pi_bar[i]
         tmp_x_hat[0] = tmp_x_hat[0]+DT*tmp_x_hat[2]
         tmp_x_hat[1] = tmp_x_hat[1]+DT*tmp_x_hat[3]
-
+        tmp_d_target = np.sqrt((tmp_x_hat[1]-tmp_s[1])**2+(tmp_x_hat[0]-tmp_s[0])**2)
        
         H = int(((len(j_pi_bar) - 3)/2))
         idx2 = 3 + H
         
+
         if len(j_pi_bar) >= 5:
-            tmp_x = np.cos(j_pi_bar[2]+j_pi_bar[idx2])*j_pi_bar[3]*DT+j_pi_bar[0]
-            tmp_y = np.sin(j_pi_bar[2]+j_pi_bar[idx2])*j_pi_bar[3]*DT+j_pi_bar[1]
-            tmp = np.sqrt((tmp_y-tmp_s[1])**2+(tmp_x-tmp_s[0])**2)
-            tmp_d_target = np.sqrt((tmp_x_hat[1]-tmp_s[1])**2+(tmp_x_hat[0]-tmp_s[0])**2)
+            if i != auvID-1:# j pi bar order is the same for everyone
+                
+                tmp_x = np.cos(j_pi_bar[2]+j_pi_bar[idx2])*j_pi_bar[3]*DT+j_pi_bar[0]
+                tmp_y = np.sin(j_pi_bar[2]+j_pi_bar[idx2])*j_pi_bar[3]*DT+j_pi_bar[1]
+                old_tmp_x.append(tmp_x)
+                old_tmp_y.append(tmp_y)
+                tmp = np.sqrt((tmp_y-tmp_s[1])**2+(tmp_x-tmp_s[0])**2)
+    
+                TL = 20*np.log(tmp) + (tmp*acoustic_loss*1e-3)
+                
+                tmp_snr = header.config.SL - TL - header.config.NL + header.config.DI
+                tmp_snr = tmp_snr/(header.config.SL - header.config.NL + header.config.DI)
+
+                if tmp_snr >= header.config.DThresh:
+                
+                    snr.append(tmp_snr)
+                    
+                else:
+                    snr.append(0)
+
+
 
             # TODO: Generalize the formula
             if (auvID == 1 and i == 1) or (auvID == 2 and i != 1) or (auvID == 3 and i == 1):
             
                 if tmp >= d_max:
-                    pen_dM = -(init_cost/header.config.H)
+                    pen_dM = -(init_cost/header.config.H)/2 - pen_dM
                 if tmp <= d_min:
-                    pen_dm = -(init_cost/header.config.H)
+                    pen_dm = -(init_cost/header.config.H)/2 - pen_dm
+    
 
-            # DON T GO AWAY AFTER DETECTION
-            if tmp_d_target > init_d:
+        # DON T GO AWAY AFTER DETECTION
+        if tmp_d_target > init_d:
 
-                pen_abs = -(init_cost/header.config.H)
-            # DON'T CONVERGE COMPLETELY TO THE TARGET 
-            if tmp_d_target <= des_range:
+            pen_abs = -(init_cost/header.config.H)
+        # DON'T CONVERGE COMPLETELY TO THE TARGET 
+        if tmp_d_target <= des_range:
+        
+            pen_abs = -(init_cost/header.config.H)
+            print('-----------------------------to near!',pen_abs)
 
-                pen_abs = -(init_cost/header.config.H)
-            
 
-    return pen_dm, pen_dM, pen_abs
+
+    '''tmp_ij = []
+    print('old_x_state:',old_tmp_x)
+    print('old_y_state',old_tmp_y)
+    for i in range(len(old_tmp_x)- 1):
+        tmp_ij.append(np.sqrt((old_tmp_y[i]-old_tmp_y[i+1])**2+(old_tmp_x[i]-old_tmp_x[i+1])**2))
+    tmp_ij.append(np.sqrt((old_tmp_y[-1]-old_tmp_y[0])**2+(old_tmp_x[-1]-old_tmp_x[0])**2))
+
+    for i in range(len(tmp_ij)):'''
+
+    # SNR between the AUVs with id div from id of vehicle
+    tmp_ij = np.sqrt((old_tmp_y[1]-old_tmp_y[0])**2+(old_tmp_x[1]-old_tmp_x[0])**2)
+    TL = 20*np.log(tmp_ij) + (tmp_ij*acoustic_loss*1e-3)   
+    tmp_snr = header.config.SL - TL - header.config.NL + header.config.DI
+    tmp_snr = tmp_snr/(header.config.SL - header.config.NL + header.config.DI)
+    
+    if tmp_snr >= header.config.DThresh and tmp_ij>0:
+        snr.append(tmp_snr)
+    else:
+        snr.append(0)
+
+    laplacian = np.zeros((loops,loops))
+
+    laplacian[0,1] = -snr[0]
+    laplacian[1,0] = -snr[0]
+    laplacian[0,2] = -snr[1]
+    laplacian[2,0] = -snr[1]
+    if len(snr) > 2:
+        laplacian[0,0] = snr[0]+snr[1]+snr[2]
+        laplacian[1,1] = snr[0]+snr[1]+snr[2]
+        laplacian[2,2] = snr[1]+snr[1]+snr[2]
+        laplacian[1,2] = -snr[2]
+        laplacian[2,1] = -snr[2]
+    else:
+        laplacian[1,2] = 0
+        laplacian[2,1] = 0
+        laplacian[0,0] = snr[0]+snr[1]
+    laplacian[1,1] = snr[0]+snr[1]
+    laplacian[2,2] = snr[1]+snr[1]
+
+    '''if auvID == 1 :
+        laplacian[0,1] = -snr[0]
+        laplacian[1,0] = -snr[0]
+        laplacian[0,2] = 0
+        laplacian[2,0] = 0
+
+        laplacian[0,0] = snr[0]
+        laplacian[1,1] = snr[0]+snr[2]
+        laplacian[2,2] = snr[2]
+        laplacian[1,2] = -snr[2]
+        laplacian[2,1] = -snr[2]
+
+    if auvID==3:
+        laplacian[0,1] = -snr[2]
+        laplacian[1,0] = -snr[2]
+        laplacian[0,2] = 0
+        laplacian[2,0] = 0
+
+        laplacian[0,0] = snr[2]
+        laplacian[1,1] = snr[1]+snr[2]
+        laplacian[2,2] = snr[1]
+        laplacian[1,2] = -snr[1]
+        laplacian[2,1] = -snr[1]
+'''
+
+
+
+    [U, S, vh] = np.linalg.svd(laplacian)
+    max_sigma = S[1]
+    if auvID == 20:
+        print('SECOND SINGULAR VALUE',max_sigma)
+        print('LAPLACIAN',laplacian)
+        print('det LAPLACIAN',np.linalg.det(laplacian))
+    if max_sigma < 0:
+        max_sigma = 0
+
+        max_sigma = 0
+
+    """ laplacian2 = np.zeros((3,3))
+    laplacian2[0,:] = [3, -2, -2]
+    laplacian2[1,:] = [-2, 3, -2]
+    laplacian2[2,:] = [-2, -2, 3]
+    [U, S, vh] = np.linalg.svd(laplacian2)
+    prova = S[1]
+    print('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',prova) """    
+
+    return max_sigma, pen_dm, pen_dM, pen_abs
+    
 
 class Simple(pybnb.Problem):
     def __init__(self, auvNum, auvID, x_hat, s, ctrl_cmds,
@@ -79,6 +194,11 @@ class Simple(pybnb.Problem):
         self._s = s
         self.init_d = init_d
         
+        # Temporary variable for plotting pareto solution
+
+        self.cost_c = []
+        self.cost_g = []
+
         # Optimization Parameters
         self.value = 0 #initial value objective function 
         self.DT = header.config.DT
@@ -110,12 +230,12 @@ class Simple(pybnb.Problem):
     def save_state(self, node):
         
         node.state = (self._x_hat, self._s, self.value, self._bound,
-                        self.choices, self.pi_bar, self.ref_vels)
+                        self.choices, self.pi_bar, self.ref_vels, self.cost_c, self.cost_g)
 
     def load_state(self, node):
 
         (self._x_hat, self._s, self.value, self._bound,
-            self.choices, self.pi_bar, self.ref_vels) = node.state
+            self.choices, self.pi_bar, self.ref_vels, self.cost_c, self.cost_g) = node.state
 
     def branch(self): #durante il branch devi calcolare le varie realizzazioni quindi simuli qua
 
@@ -135,25 +255,33 @@ class Simple(pybnb.Problem):
             choices = self.choices + tmp
             tmp_ref_vels = self.ref_vels + [tmp_v_n]
             
+
+
             father_value = cost
             cost_d = self.des_range/((np.sqrt((x[0]-tmp_s[0])**2+(x[1]-tmp_s[1])**2)))  
             cost_g = 1/header.utils.compute_cost(phi)
 
-            pen_dm, pen_dM, pen_abs = heuristicPenalty(tmp_pi_bar, tmp_s,
+            cost_c, pen_dm, pen_dM, pen_abs = heuristicPenalty(tmp_pi_bar, tmp_s,
                                                         cost, self.DT, 
                                                         self.init_d, x, self.des_range, self.auvID)
                                    
-            child_value = father_value + cost_g + cost_d + pen_dM + pen_dm + pen_abs
+            if cost_c > 1.5:
+                cost_c = 1.5
+
+            weight = 1.0#0.2
+            tmp_list_c = self.cost_c + [cost_c]
+            tmp_list_g = self.cost_g + [cost_g]
+            child_value = father_value + cost_g + weight*cost_c#+ cost_d + pen_dM + pen_dm + pen_abs
             
-            if self.auvID == 10:
-                print('--------------------HORIZON',len(choices))
+            if self.auvID == 20:
+                '''print('--------------------HORIZON',len(choices))
                 print('----------------------------------------self.value',self.value)
                 print('--------------------father value',father_value)
                 print('pen_dm',pen_dm)
                 print('pen_dM',pen_dM)
-                print('pen_abs',pen_abs)
+                print('pen_abs',pen_abs)'''
                 print('w_g*cost_g',cost_g)
-                print('w_d*cost_d',cost_d)
+                print('w_d*cost_d',cost_c)
                 print('--------------------------------------------child_value',child_value)
             # Compute the bound according to the proposed algorithm
             if len(choices) == header.config.H:
@@ -166,7 +294,7 @@ class Simple(pybnb.Problem):
                     self._bound = child_value
             # Branch the tree         
             child = pybnb.Node()
-            child.state = (x, tmp_s, child_value, self._bound, choices, tmp_pi_bar, tmp_ref_vels)
+            child.state = (x, tmp_s, child_value, self._bound, choices, tmp_pi_bar, tmp_ref_vels, tmp_list_c, tmp_list_g)
             
             yield child
 
