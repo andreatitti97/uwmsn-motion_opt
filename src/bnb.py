@@ -2,6 +2,7 @@
 import os, pathlib, importlib.util
 # Import math modules
 import numpy as np
+import math
 # Import solver library
 import pybnb 
 
@@ -19,11 +20,15 @@ def alpha(f):
     
     return 0.11*(f**2/(1+f**2))+44*(f**2/(4100+f**2))+(2.75*(1e-4)*(f**2))+0.003
 
-def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat, des_range, auvID):
+def connectivityCost(tmp_pi_bar, tmp_s, DT, init_d, x_hat, des_range, auvID, NL):
 
     pen_dm, pen_dM, pen_abs = 0, 0, 0
     d_max, d_min = header.config.max_distance, header.config.min_distance
-    acoustic_loss = alpha(header.config.f)
+
+    acoustic_loss = alpha(header.config.f) #f is in kHz
+    TL_ideal = 20*np.log(d_min) + (d_min*acoustic_loss*1e-3)
+    ideal_snr = (header.config.SL - TL_ideal - NL + header.config.DI)#SNR without transmission loss--> to bound values.
+  
     snr = []
     tmp = []
     loops = len(tmp_pi_bar)
@@ -53,55 +58,48 @@ def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat, des_range,
                 TL = 20*np.log(tmp) + (tmp*acoustic_loss*1e-3)
                 
                 tmp_snr = header.config.SL - TL - header.config.NL + header.config.DI
-                tmp_snr = tmp_snr/(header.config.SL - header.config.NL + header.config.DI)
+                tmp_snr = tmp_snr/ideal_snr
 
-                if tmp_snr >= header.config.DThresh:
-                
-                    snr.append(tmp_snr)
-                    
+                if tmp_snr >= header.config.DThresh/ideal_snr:
+                    if tmp_snr >= 1.0:
+                        snr.append(1.0)
+                    else:
+                        snr.append(tmp_snr)
                 else:
                     snr.append(0)
 
-
-
-            # TODO: Generalize the formula
+            # TODO: Generalize the formula -- Collision Avoidance Constraint
             if (auvID == 1 and i == 1) or (auvID == 2 and i != 1) or (auvID == 3 and i == 1):
             
-                if tmp >= d_max:
-                    pen_dM = -(init_cost/header.config.H)/2 - pen_dM
                 if tmp <= d_min:
-                    pen_dm = -(init_cost/header.config.H)/2 - pen_dm
+                    pen_dm = 1.0
     
-
-        # DON T GO AWAY AFTER DETECTION
-        if tmp_d_target > init_d:
-
-            pen_abs = -(init_cost/header.config.H)
-        # DON'T CONVERGE COMPLETELY TO THE TARGET 
-        if tmp_d_target <= des_range:
+            
+        # Constraint: stay to a certain vicinity of the target
+        if tmp_d_target >= init_d:
         
-            pen_abs = -(init_cost/header.config.H)
-            print('-----------------------------to near!',pen_abs)
+            pen_abs = 1.0
 
+        elif tmp_d_target <= des_range:
+            pen_abs = 1.0
+            print('TO NEAR')
 
-
-    '''tmp_ij = []
-    print('old_x_state:',old_tmp_x)
-    print('old_y_state',old_tmp_y)
-    for i in range(len(old_tmp_x)- 1):
-        tmp_ij.append(np.sqrt((old_tmp_y[i]-old_tmp_y[i+1])**2+(old_tmp_x[i]-old_tmp_x[i+1])**2))
-    tmp_ij.append(np.sqrt((old_tmp_y[-1]-old_tmp_y[0])**2+(old_tmp_x[-1]-old_tmp_x[0])**2))
-
-    for i in range(len(tmp_ij)):'''
-
-    # SNR between the AUVs with id div from id of vehicle
-    tmp_ij = np.sqrt((old_tmp_y[1]-old_tmp_y[0])**2+(old_tmp_x[1]-old_tmp_x[0])**2)
-    TL = 20*np.log(tmp_ij) + (tmp_ij*acoustic_loss*1e-3)   
+    # Expected SNR between the AUVs with ID != from current ID
+    d_ij = np.sqrt((old_tmp_y[1]-old_tmp_y[0])**2+(old_tmp_x[1]-old_tmp_x[0])**2)
+    TL = 20*np.log(d_ij) + (d_ij*acoustic_loss*1e-3)   
     tmp_snr = header.config.SL - TL - header.config.NL + header.config.DI
-    tmp_snr = tmp_snr/(header.config.SL - header.config.NL + header.config.DI)
-    
-    if tmp_snr >= header.config.DThresh and tmp_ij>0:
-        snr.append(tmp_snr)
+    if auvID == 1:
+        print('tmp_sntr-----------------------------------------------------------------',tmp_snr)
+    # normalize the snr according to the desired one, i.e., 1/4 of the SL (0 is not realistic)
+    tmp_snr = tmp_snr/ideal_snr
+    if auvID == 1:
+        print('tmp_sntr-----------------------------------------------------------------',tmp_snr)
+        print('THRESH SNR-----------------------------------------------------------------',ideal_snr)
+    if tmp_snr >= header.config.DThresh/ideal_snr and d_ij>0:
+        if tmp_snr >= 1.0:
+            snr.append(1.0)
+        else:
+            snr.append(tmp_snr)
     else:
         snr.append(0)
 
@@ -109,22 +107,18 @@ def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat, des_range,
 
     laplacian[0,1] = -snr[0]
     laplacian[1,0] = -snr[0]
-    laplacian[0,2] = -snr[1]
-    laplacian[2,0] = -snr[1]
-    if len(snr) > 2:
-        laplacian[0,0] = snr[0]+snr[1]+snr[2]
-        laplacian[1,1] = snr[0]+snr[1]+snr[2]
-        laplacian[2,2] = snr[1]+snr[1]+snr[2]
-        laplacian[1,2] = -snr[2]
-        laplacian[2,1] = -snr[2]
-    else:
-        laplacian[1,2] = 0
-        laplacian[2,1] = 0
-        laplacian[0,0] = snr[0]+snr[1]
-    laplacian[1,1] = snr[0]+snr[1]
-    laplacian[2,2] = snr[1]+snr[1]
+    laplacian[0,2] = 0 #should be zero but this avoid numerical problems
+    laplacian[2,0] = 0
 
-    '''if auvID == 1 :
+    laplacian[0,0] = snr[0]
+    laplacian[1,1] = snr[0]+snr[1]
+    laplacian[2,2] = snr[1]
+    laplacian[1,2] = -snr[1]
+    laplacian[2,1] = -snr[1]
+
+    
+    auv2_bridge = True
+    if auvID == 1 and auv2_bridge== True:
         laplacian[0,1] = -snr[0]
         laplacian[1,0] = -snr[0]
         laplacian[0,2] = 0
@@ -136,7 +130,7 @@ def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat, des_range,
         laplacian[1,2] = -snr[2]
         laplacian[2,1] = -snr[2]
 
-    if auvID==3:
+    if auvID==3 and auv2_bridge== True:
         laplacian[0,1] = -snr[2]
         laplacian[1,0] = -snr[2]
         laplacian[0,2] = 0
@@ -147,35 +141,24 @@ def heuristicPenalty(tmp_pi_bar, tmp_s, init_cost, DT, init_d, x_hat, des_range,
         laplacian[2,2] = snr[1]
         laplacian[1,2] = -snr[1]
         laplacian[2,1] = -snr[1]
-'''
-
 
 
     [U, S, vh] = np.linalg.svd(laplacian)
     max_sigma = S[1]
-    if auvID == 20:
+    if auvID == 1:
+        print('NOISE LEVEL (dB)',NL)
         print('SECOND SINGULAR VALUE',max_sigma)
         print('LAPLACIAN',laplacian)
-        print('det LAPLACIAN',np.linalg.det(laplacian))
-    if max_sigma < 0:
+    if max_sigma < 0: #if the graph is disconnected (for now expection not considered)
         max_sigma = 0
 
-        max_sigma = 0
 
-    """ laplacian2 = np.zeros((3,3))
-    laplacian2[0,:] = [3, -2, -2]
-    laplacian2[1,:] = [-2, 3, -2]
-    laplacian2[2,:] = [-2, -2, 3]
-    [U, S, vh] = np.linalg.svd(laplacian2)
-    prova = S[1]
-    print('AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',prova) """    
-
-    return max_sigma, pen_dm, pen_dM, pen_abs
+    return max_sigma, pen_dm, pen_abs
     
 
 class Simple(pybnb.Problem):
     def __init__(self, auvNum, auvID, x_hat, s, ctrl_cmds,
-                    pi_bar, init_state, init_d, v_n = 0, cpf_control = []):
+                    pi_bar, init_state, init_d, NL, v_n = 0, cpf_control = []):
                
         # Basic parameters initialization
         self.auvNum = auvNum
@@ -194,10 +177,11 @@ class Simple(pybnb.Problem):
         self._s = s
         self.init_d = init_d
         
-        # Temporary variable for plotting pareto solution
+        #Temporary variable for plotting pareto solution
 
         self.cost_c = []
         self.cost_g = []
+        self.cost_d = []
 
         # Optimization Parameters
         self.value = 0 #initial value objective function 
@@ -206,7 +190,20 @@ class Simple(pybnb.Problem):
         self.des_range = header.config.RANGE_TO_TARGET
         self.inf = float("inf")
         self._bound = self.inf #greedy search'''
+        ideal_laplacian = np.zeros((auvNum,auvNum))
+        # Acoustic environment and modem parameters
+        self.NL = NL
+        desired_snr = 1
+        ideal_laplacian[0] = [desired_snr, -desired_snr, 0]
+        ideal_laplacian[1] = [-desired_snr, desired_snr*2, -desired_snr]
+        ideal_laplacian[2] = [0, -desired_snr, desired_snr]
+        # Parameters estimation problem
+        self.gamma_w = header.config.gamma_w
+        self.alpha_w = header.config.alpha_w
         
+        [U,S,V] = np.linalg.svd(ideal_laplacian)
+        self.bound_conn = S[1]
+        print(self.bound_conn)
         # Variables for path init
         tmp = np.zeros((self.auvNum,3))
         for i in range(len(tmp)):
@@ -230,12 +227,12 @@ class Simple(pybnb.Problem):
     def save_state(self, node):
         
         node.state = (self._x_hat, self._s, self.value, self._bound,
-                        self.choices, self.pi_bar, self.ref_vels, self.cost_c, self.cost_g)
+                        self.choices, self.pi_bar, self.ref_vels, self.cost_c, self.cost_g, self.cost_d)
 
     def load_state(self, node):
 
         (self._x_hat, self._s, self.value, self._bound,
-            self.choices, self.pi_bar, self.ref_vels, self.cost_c, self.cost_g) = node.state
+            self.choices, self.pi_bar, self.ref_vels, self.cost_c, self.cost_g, self.cost_d) = node.state
 
     def branch(self): #durante il branch devi calcolare le varie realizzazioni quindi simuli qua
 
@@ -249,31 +246,39 @@ class Simple(pybnb.Problem):
             x, phi, tmp_s, tmp_pi_bar = self.simulation(self.ctrl_cmds[i], 
                                                         x_hat, self.P, s, self.sensors, 
                                                         tmp_v_n, self.DT, pi_bar, self.init_s_state)
-            
-            # Update the sequence of control decisions
-            tmp = [self.ctrl_cmds[i]]
-            choices = self.choices + tmp
-            tmp_ref_vels = self.ref_vels + [tmp_v_n]
-            
-
 
             father_value = cost
             cost_d = self.des_range/((np.sqrt((x[0]-tmp_s[0])**2+(x[1]-tmp_s[1])**2)))  
-            cost_g = 1/header.utils.compute_cost(phi)
+            cost_g = 1/header.utils.compute_cost(phi) # in [0,1]
 
-            cost_c, pen_dm, pen_dM, pen_abs = heuristicPenalty(tmp_pi_bar, tmp_s,
-                                                        cost, self.DT, 
-                                                        self.init_d, x, self.des_range, self.auvID)
+            cost_c, pen_dm, pen_abs = connectivityCost(tmp_pi_bar, tmp_s, self.DT, 
+                                                        self.init_d, x, self.des_range,
+                                                        self.auvID, self.NL)
+
                                    
-            if cost_c > 1.5:
-                cost_c = 1.5
+            if cost_d >= 1.0: #to bound the objective w.r.t to the desired range (parameter)
+                cost_d = 1.0 # in [0,1]
 
-            weight = 1.0#0.2
+            
+            ord_d = math.floor(math.log(cost_d, 10))
+            '''if cost_c != 0.0:
+                ord_c = math.floor(math.log(cost_c, 10))
+                self.gamma_w = 1**(ord_c-ord_d)
+                
+            else:
+                w_c = 0.0
+            '''
+
             tmp_list_c = self.cost_c + [cost_c]
             tmp_list_g = self.cost_g + [cost_g]
-            child_value = father_value + cost_g + weight*cost_c#+ cost_d + pen_dM + pen_dm + pen_abs
-            
-            if self.auvID == 20:
+            tmp_list_d = self.cost_d + [cost_d]
+
+          
+            child_value = father_value + (self.alpha_w)*cost_g + (1-self.alpha_w)*cost_d + self.gamma_w*cost_c 
+            if pen_abs == 1.0 or pen_dm == 1.0:
+                child_value = father_value
+
+            if self.auvID == 1:
                 '''print('--------------------HORIZON',len(choices))
                 print('----------------------------------------self.value',self.value)
                 print('--------------------father value',father_value)
@@ -281,20 +286,28 @@ class Simple(pybnb.Problem):
                 print('pen_dM',pen_dM)
                 print('pen_abs',pen_abs)'''
                 print('w_g*cost_g',cost_g)
-                print('w_d*cost_d',cost_c)
+                print('w_c*cost_c',self.gamma_w*cost_c)
+                print('w_d*cost_d',cost_d)
                 print('--------------------------------------------child_value',child_value)
+
             # Compute the bound according to the proposed algorithm
+            tmp = [self.ctrl_cmds[i]]
+            
+            choices = self.choices + tmp
+            tmp_ref_vels = self.ref_vels + [tmp_v_n]
+
             if len(choices) == header.config.H:
                 child_value = child_value + 1
                 
-                if self._bound == +self.inf:
+                if self._bound == +self.inf:# UNIFORM COST SEARCH SETUP
                     self._bound = child_value
 
                 if child_value >= self._bound:
                     self._bound = child_value
-            # Branch the tree         
+
+            # Branch the tree  
             child = pybnb.Node()
-            child.state = (x, tmp_s, child_value, self._bound, choices, tmp_pi_bar, tmp_ref_vels, tmp_list_c, tmp_list_g)
+            child.state = (x, tmp_s, child_value, self._bound, choices, tmp_pi_bar, tmp_ref_vels, tmp_list_c, tmp_list_g, tmp_list_d)
             
             yield child
 

@@ -2,6 +2,7 @@
 import os, pathlib, importlib.util
 # Import math modules
 import numpy as np
+from math import atan2
 # Import ROS modules and Service
 import rospy
 from rospy_tutorials.msg import Floats
@@ -159,11 +160,12 @@ def main():
     listener(auvID,auvNum)
     # Init time variables and counters and lists
     t, count1, count_low, count_max = 0,0,0,0
-    
+    sim_time = header.config.TIME_DURATION
     avg_time, avg_nodes, old_ctrls = [],[],[]
 
     pareto_data_c = []
     pareto_data_g = []
+    pareto_data_d = []
 
     old_t_state = [None, None, None, None]
 
@@ -172,6 +174,7 @@ def main():
     dt = header.config.TIME_STEP*t_scaler
     u_max = header.config.u_max
     delta_u = header.config.delta_u
+    DT = header.config.DT
     
     ctrl_set = header.config.ctrl_cmd
     limit = 0.0# Compute nodes limit according to RHC with finite memory
@@ -183,6 +186,11 @@ def main():
 
     rospy.sleep(1)
     while not rospy.is_shutdown():
+
+        if t > sim_time/2:
+            NL = header.config.NL#80 #dB
+        else:
+            NL = header.config.NL
 
         if t_state[0] != old_t_state[0] and t_state[0] != None:
             pi_bar_in, s, x_hat = [], [], []
@@ -197,7 +205,7 @@ def main():
             if t_state[4] != -10**3:
                 # Initialize the problem
                 problem = header.bnb.Simple(auvNum, auvID, x_hat[0:4], s_state, ctrl_set,
-                                            pi_bar_in, init_state, init_d[auvID-1], x_hat[4])
+                                            pi_bar_in, init_state, init_d[auvID-1], NL, x_hat[4])
                 # Solve the optimization problem
                 solver = header.bnb.pybnb.Solver()
                 # Store the results
@@ -206,17 +214,16 @@ def main():
                         
                 best_node_states, wall_time, nodes = results.best_node.state, results.wall_time, results.nodes
                 avg_nodes.append(nodes), avg_time.append(wall_time)
-                output_policy, ref_vels, list_c, list_g  = best_node_states[4], best_node_states[6], best_node_states[7], best_node_states[8]
-                
-                '''for i in range(len(list_c)):
-                    pareto_data_c.append(list_c[i])
-                    pareto_data_g.append(list_g[i])'''
+                output_policy, ref_vels, list_c, list_g, list_d  = best_node_states[4], best_node_states[6], best_node_states[7], best_node_states[8], best_node_states[9]
+   
                 if auvID == 2:
                     pareto_data_c.append(list_c[0])
                     pareto_data_g.append(list_g[0])
+                    pareto_data_d.append(list_d[0])
 
                     np.savetxt(log_path+'/list_c',pareto_data_c)
-                    np.savetxt(log_path+'/list_g',pareto_data_g)
+                    np.savetxt(log_path+'/list_d',pareto_data_g)
+                    np.savetxt(log_path+'/list_d',pareto_data_d)
                 #Formatting the results according to the communication protocol
                 msg = [s_state[0],s_state[1],s_state[2]]
                 for i in range(header.config.H+1):
