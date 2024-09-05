@@ -20,7 +20,8 @@ def alpha(f):
     
     return 0.11*(f**2/(1+f**2))+44*(f**2/(4100+f**2))+(2.75*(1e-4)*(f**2))+0.003
 
-def connectivityCost(tmp_pi_bar, tmp_s, DT, init_d, x_hat, des_range, auvID, NL):
+def connectivityCost(tmp_pi_bar, tmp_s, DT, init_d,
+                     x_hat, des_range, auvID, NL, AUV_failure):
 
     pen_dm, pen_dM, pen_abs = 0, 0, 0
     d_max, d_min = header.config.max_distance, header.config.min_distance
@@ -31,7 +32,7 @@ def connectivityCost(tmp_pi_bar, tmp_s, DT, init_d, x_hat, des_range, auvID, NL)
   
     snr = []
     tmp = []
-    loops = len(tmp_pi_bar)
+    loops = 3# len(tmp_pi_bar)
     tmp_x_hat = x_hat
 
     old_tmp_x = []
@@ -61,8 +62,8 @@ def connectivityCost(tmp_pi_bar, tmp_s, DT, init_d, x_hat, des_range, auvID, NL)
                 tmp_snr = tmp_snr/ideal_snr
 
                 if tmp_snr >= header.config.DThresh/ideal_snr:
-                    if tmp_snr >= 1.0:
-                        snr.append(1.0)
+                    if tmp_snr > 1.0:
+                        snr.append(0.0)
                     else:
                         snr.append(tmp_snr)
                 else:
@@ -88,16 +89,16 @@ def connectivityCost(tmp_pi_bar, tmp_s, DT, init_d, x_hat, des_range, auvID, NL)
     d_ij = np.sqrt((old_tmp_y[1]-old_tmp_y[0])**2+(old_tmp_x[1]-old_tmp_x[0])**2)
     TL = 20*np.log(d_ij) + (d_ij*acoustic_loss*1e-3)   
     tmp_snr = header.config.SL - TL - header.config.NL + header.config.DI
-    if auvID == 1:
+    if auvID == 10:
         print('tmp_sntr-----------------------------------------------------------------',tmp_snr)
     # normalize the snr according to the desired one, i.e., 1/4 of the SL (0 is not realistic)
     tmp_snr = tmp_snr/ideal_snr
-    if auvID == 1:
+    if auvID == 10:
         print('tmp_sntr-----------------------------------------------------------------',tmp_snr)
         print('THRESH SNR-----------------------------------------------------------------',ideal_snr)
     if tmp_snr >= header.config.DThresh/ideal_snr and d_ij>0:
-        if tmp_snr >= 1.0:
-            snr.append(1.0)
+        if tmp_snr > 1.0:
+            snr.append(0.0)
         else:
             snr.append(tmp_snr)
     else:
@@ -105,47 +106,70 @@ def connectivityCost(tmp_pi_bar, tmp_s, DT, init_d, x_hat, des_range, auvID, NL)
 
     laplacian = np.zeros((loops,loops))
 
-    laplacian[0,1] = -snr[0]
-    laplacian[1,0] = -snr[0]
-    laplacian[0,2] = 0 #should be zero but this avoid numerical problems
-    laplacian[2,0] = 0
+    if AUV_failure == False:
 
-    laplacian[0,0] = snr[0]
-    laplacian[1,1] = snr[0]+snr[1]
-    laplacian[2,2] = snr[1]
-    laplacian[1,2] = -snr[1]
-    laplacian[2,1] = -snr[1]
-
-    
-    auv2_bridge = True
-    if auvID == 1 and auv2_bridge== True:
         laplacian[0,1] = -snr[0]
         laplacian[1,0] = -snr[0]
-        laplacian[0,2] = 0
+        laplacian[0,2] = 0 #should be zero but this avoid numerical problems
         laplacian[2,0] = 0
 
         laplacian[0,0] = snr[0]
-        laplacian[1,1] = snr[0]+snr[2]
-        laplacian[2,2] = snr[2]
-        laplacian[1,2] = -snr[2]
-        laplacian[2,1] = -snr[2]
-
-    if auvID==3 and auv2_bridge== True:
-        laplacian[0,1] = -snr[2]
-        laplacian[1,0] = -snr[2]
-        laplacian[0,2] = 0
-        laplacian[2,0] = 0
-
-        laplacian[0,0] = snr[2]
-        laplacian[1,1] = snr[1]+snr[2]
+        laplacian[1,1] = snr[0]+snr[1]
         laplacian[2,2] = snr[1]
         laplacian[1,2] = -snr[1]
         laplacian[2,1] = -snr[1]
 
+        
+        auv2_bridge = True
+        if auvID == 1 and auv2_bridge== True:
+            '''laplacian[0,1] = -snr[0]
+            laplacian[1,0] = -snr[0]
+            laplacian[0,2] = 0
+            laplacian[2,0] = 0
+
+            laplacian[0,0] = snr[0]
+            laplacian[1,1] = snr[0]+snr[2]
+            laplacian[2,2] = snr[2]
+            laplacian[1,2] = -snr[2]
+            laplacian[2,1] = -snr[2]'''
+            laplacian = np.zeros((2,2))
+            laplacian[0,0] = snr[1]
+            laplacian[1,1] = snr[1]
+            laplacian[0,1] = -snr[1]
+            laplacian[1,0] = -snr[1]
+
+        if auvID == 3 and auv2_bridge== True:
+            '''laplacian[0,1] = -snr[2]
+            laplacian[1,0] = -snr[2]
+            laplacian[0,2] = 0
+            laplacian[2,0] = 0
+
+            laplacian[0,0] = snr[2]
+            laplacian[1,1] = snr[1]+snr[2]
+            laplacian[2,2] = snr[1]
+            laplacian[1,2] = -snr[1]
+            laplacian[2,1] = -snr[1]'''
+            laplacian = np.zeros((2,2))
+            laplacian[0,0] = snr[0]
+            laplacian[1,1] = snr[0]
+            laplacian[0,1] = -snr[0]
+            laplacian[1,0] = -snr[0]
+    else:
+        laplacian = np.zeros((2,2))
+        if auvID == 1:
+            laplacian[0,0] = snr[1]
+            laplacian[1,1] = snr[1]
+            laplacian[0,1] = -snr[1]
+            laplacian[1,0] = -snr[1]
+        elif auvID == 3:
+            laplacian[0,0] = snr[0]
+            laplacian[1,1] = snr[0]
+            laplacian[0,1] = -snr[0]
+            laplacian[1,0] = -snr[0]
 
     [U, S, vh] = np.linalg.svd(laplacian)
     max_sigma = S[1]
-    if auvID == 1:
+    if auvID == 10:
         print('NOISE LEVEL (dB)',NL)
         print('SECOND SINGULAR VALUE',max_sigma)
         print('LAPLACIAN',laplacian)
@@ -158,7 +182,7 @@ def connectivityCost(tmp_pi_bar, tmp_s, DT, init_d, x_hat, des_range, auvID, NL)
 
 class Simple(pybnb.Problem):
     def __init__(self, auvNum, auvID, x_hat, s, ctrl_cmds,
-                    pi_bar, init_state, init_d, NL, v_n = 0, cpf_control = []):
+                    pi_bar, init_state, init_d, NL, AUV_failure, v_n = 0, cpf_control = []):
                
         # Basic parameters initialization
         self.auvNum = auvNum
@@ -213,6 +237,7 @@ class Simple(pybnb.Problem):
         self.init_s_state = tmp
         self.v_n = v_n
         self.ref_vels = [self.v_n]
+        self.AUV_failure = AUV_failure
 
     # Required methods for graph generation and searching
     def sense(self):
@@ -245,7 +270,8 @@ class Simple(pybnb.Problem):
             
             x, phi, tmp_s, tmp_pi_bar = self.simulation(self.ctrl_cmds[i], 
                                                         x_hat, self.P, s, self.sensors, 
-                                                        tmp_v_n, self.DT, pi_bar, self.init_s_state)
+                                                        tmp_v_n, self.DT, pi_bar,
+                                                        self.init_s_state, self.AUV_failure)
 
             father_value = cost
             cost_d = self.des_range/((np.sqrt((x[0]-tmp_s[0])**2+(x[1]-tmp_s[1])**2)))  
@@ -253,7 +279,7 @@ class Simple(pybnb.Problem):
 
             cost_c, pen_dm, pen_abs = connectivityCost(tmp_pi_bar, tmp_s, self.DT, 
                                                         self.init_d, x, self.des_range,
-                                                        self.auvID, self.NL)
+                                                        self.auvID, self.NL, self.AUV_failure)
 
                                    
             if cost_d >= 1.0: #to bound the objective w.r.t to the desired range (parameter)
@@ -278,7 +304,7 @@ class Simple(pybnb.Problem):
             if pen_abs == 1.0 or pen_dm == 1.0:
                 child_value = father_value
 
-            if self.auvID == 1:
+            if self.auvID == 2:
                 '''print('--------------------HORIZON',len(choices))
                 print('----------------------------------------self.value',self.value)
                 print('--------------------father value',father_value)
@@ -320,7 +346,7 @@ class Simple(pybnb.Problem):
             H = int(((len(j_pi_bar) - 3)/2))
             idx2 = 3 + H
 
-            if np.sum(j_pi_bar) != 0 or self.auvID == i+1:
+            if np.sum(j_pi_bar) != 0 or j_pi_bar != [] or self.auvID == i+1:
                 if self.auvID == i+1: # Compute the path of the i-th AUV acoording to the choosen command
                     
                     ax = np.cos(s_pose[2]+ctrl_input)*v_n*DT+s_pose[0]
@@ -331,11 +357,16 @@ class Simple(pybnb.Problem):
                     ax_j = np.cos(j_pi_bar[2]+j_pi_bar[idx2])*j_pi_bar[3]*DT+j_pi_bar[0]
                     ay_j = np.sin(j_pi_bar[2]+j_pi_bar[idx2])*j_pi_bar[3]*DT+j_pi_bar[1]
                     auvs_xy[i] = [ax_j,ay_j,j_pi_bar[2]+j_pi_bar[idx2]]
-                    out = auvs_xy[i]
 
-                j_pi_bar = np.delete(j_pi_bar,idx2)
-                if len(j_pi_bar) > 3:#remove related ref vel
-                    j_pi_bar = np.delete(j_pi_bar,3)
+                out = auvs_xy[i]
+                '''print('AUV current ID ------------------',self.auvID)
+                print('j-th agent ---------------',i+1)
+                print('j pi bar - BUG ------------------',j_pi_bar)'''
+
+                if self.auvID != i+1:
+                    j_pi_bar = np.delete(j_pi_bar,idx2)
+                    if len(j_pi_bar) > 3:#remove related ref vel
+                        j_pi_bar = np.delete(j_pi_bar,3)
                 
                 for j in range(len(j_pi_bar[3:len(j_pi_bar)])):
                     out.append(j_pi_bar[j+3])
@@ -351,7 +382,8 @@ class Simple(pybnb.Problem):
             
         return pi_bar_out, auvs_xy, [ax, ay, s_pose[2]+ctrl_input]
 
-    def simulation(self, ctrl_input, x_hat, P, s_pose, sensors, v_n, DT, pi_bar, init_state):
+    def simulation(self, ctrl_input, x_hat, P, s_pose, sensors,
+                   v_n, DT, pi_bar, init_state, AUV_failure):
        
         # Init data structures
         meas_table = []
@@ -388,10 +420,14 @@ class Simple(pybnb.Problem):
 
         # YOU SHOULD CONSIDER ONLY YOUR NEIGHBOURs IN OPTIMIZING THE GEOMTRY
         # TODO: Generalize the formula (brute version for 3 auv)
-        if self.auvID == 1:
-            meas_table.pop(2)
-        elif self.auvID == 3:
-            meas_table.pop(0)
+        if AUV_failure == False:
+            if self.auvID == 1:
+                meas_table.pop(2)
+            elif self.auvID == 3:
+                meas_table.pop(0)
+        elif AUV_failure == True:
+            meas_table.pop(1)
+        
 
         # Compute the regressor according to measurements simulated
         estimator.computeState(meas_table)

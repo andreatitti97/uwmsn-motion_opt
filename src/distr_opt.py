@@ -18,18 +18,21 @@ header = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(header)
 
 # Init global variables for callbacks
+AUV_XY = header.config.AUV_XY
 t_est_x, t_est_y, s_state_x, s_state_y = [], [], [], []
 t_state = [None, None, None, None, None]
 s_state = [None, None, None]
-policies_intent = [[], [], [], []]
+policies_intent = [[],
+                   [],
+                   [], []]
 init_state = None
 init_d = None
 
-for i in range(len(policies_intent)):
+'''for i in range(len(policies_intent)):
     tmp = []
     for j in range((len(s_state)+((header.config.H+1)*2))):
         tmp.append(0.0)
-    policies_intent[i] = tmp
+    policies_intent[i] = tmp'''
 
 def frbdDcsMtd(output_policy):
     # Forbidden Decision Method
@@ -184,6 +187,8 @@ def main():
     # Init publishers and subscribers
     pub_ctrl_policy = rospy.Publisher('/'+str(auvID)+'/ctrl_policy',numpy_msg(Floats),queue_size=100)
 
+    AUV_failure = False
+
     rospy.sleep(1)
     while not rospy.is_shutdown():
 
@@ -191,6 +196,9 @@ def main():
             NL = header.config.NL#80 #dB
         else:
             NL = header.config.NL
+
+        if t > sim_time/2:
+            AUV_failure = True
 
         if t_state[0] != old_t_state[0] and t_state[0] != None:
             pi_bar_in, s, x_hat = [], [], []
@@ -203,9 +211,25 @@ def main():
                 s.append(s_state[i])
 
             if t_state[4] != -10**3:
+
+                if t < DT:
+                    pi_bar_in = []
+                    for i in range(auvNum):
+                        pi_i = []
+                        for j in range(len(s_state)):
+                            pi_i.append(AUV_XY[i+1,j])
+                        for k in range((((header.config.H+1)*2))):
+                            pi_i.append(0.0)
+
+                        pi_bar_in.append(pi_i)
+                        
+
                 # Initialize the problem
+                rospy.loginfo('%s OPTIMIZATION ID %s STARTING! --> Policy of intent: %s %s',cyan,auvID,pi_bar_in,none)
+                
                 problem = header.bnb.Simple(auvNum, auvID, x_hat[0:4], s_state, ctrl_set,
-                                            pi_bar_in, init_state, init_d[auvID-1], NL, x_hat[4])
+                                            pi_bar_in, init_state, init_d[auvID-1],
+                                            NL, AUV_failure, x_hat[4])                                        
                 # Solve the optimization problem
                 solver = header.bnb.pybnb.Solver()
                 # Store the results
