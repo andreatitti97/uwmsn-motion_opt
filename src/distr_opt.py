@@ -187,7 +187,7 @@ def main():
     # Init publishers and subscribers
     pub_ctrl_policy = rospy.Publisher('/'+str(auvID)+'/ctrl_policy',numpy_msg(Floats),queue_size=100)
 
-    AUV_failure = False
+    AUV_failure = header.config.AUV_failure
 
     rospy.sleep(1)
     while not rospy.is_shutdown():

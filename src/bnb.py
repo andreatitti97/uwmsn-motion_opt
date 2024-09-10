@@ -304,7 +304,7 @@ class Simple(pybnb.Problem):
             if pen_abs == 1.0 or pen_dm == 1.0:
                 child_value = father_value
 
-            if self.auvID == 2:
+            if self.auvID == 20:
                 '''print('--------------------HORIZON',len(choices))
                 print('----------------------------------------self.value',self.value)
                 print('--------------------father value',father_value)
