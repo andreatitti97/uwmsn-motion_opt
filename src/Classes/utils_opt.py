@@ -70,7 +70,5 @@ def computePursuitVel(curr_est,s_pose,d_max):
 
     if v_n > config.AUV_MAX_VEL:#saturate desired vel
         v_n = config.AUV_MAX_VEL
-    '''if 0 < eucl_dist <= config.RANGE_TO_TARGET:
-        v_n = np.sqrt((tmp_curr_est[2])**2+(tmp_curr_est[3])**2)'''
 
     return v_n
