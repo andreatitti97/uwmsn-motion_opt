@@ -31,7 +31,7 @@ def connectivityCost(tmp_pi_bar, tmp_s, DT, init_d,
     acoustic_loss = alpha(header.config.f) #f is in kHz
     TL_ideal = 20*np.log(d_min) + (d_min*acoustic_loss*1e-3)
     ideal_snr = (header.config.SL - TL_ideal - NL + header.config.DI)#SNR without transmission loss--> to bound values.
-    ideal_snr = 1.0
+   
     for i in range(loops):
         j_pi_bar = tmp_pi_bar[i]
         x_hat[0] = x_hat[0]+DT*x_hat[2]
@@ -111,21 +111,9 @@ def connectivityCost(tmp_pi_bar, tmp_s, DT, init_d,
         laplacian[1,2] = -snr[1]
         laplacian[2,1] = -snr[1]
 
-        
-        
-        if header.config.AUV2_bridge == True:
+        if header.config.AUV2_bridge == False:
             laplacian = np.zeros((2,2))
-            if auvID == 1:                
-                laplacian[0,0] = snr[1]
-                laplacian[1,1] = snr[1]
-                laplacian[0,1] = -snr[1]
-                laplacian[1,0] = -snr[1]
-
-            if auvID == 3:
-                laplacian[0,0] = snr[0]
-                laplacian[1,1] = snr[0]
-                laplacian[0,1] = -snr[0]
-                laplacian[1,0] = -snr[0]
+            ''' TO DO '''
         else:
             if auvID == 1:
                 laplacian[0,1] = -snr[0]
@@ -162,10 +150,12 @@ def connectivityCost(tmp_pi_bar, tmp_s, DT, init_d,
             laplacian[0,1] = -snr[0]
             laplacian[1,0] = -snr[0]
 
+    #if auvID == 1:
+        #print(laplacian)
+
     [U, S, vh] = np.linalg.svd(laplacian)
     max_sigma = S[1]
-    #if auvID == 1:
-    #    print('+++++++++++++++++++++++++++++++++++',max_sigma)
+
     if max_sigma < 0: #if the graph is disconnected
         max_sigma = 0
 
@@ -274,6 +264,8 @@ class Simple(pybnb.Problem):
 
             child_value = father_value + (self.alpha_w)*cost_g + (1-self.alpha_w)*cost_d  \
                             + self.gamma_w*cost_c 
+            child_value = father_value + cost_g + cost_d  \
+                            +  cost_c 
             
             if pen_abs == 1.0 or pen_dm == 1.0:
                 child_value = father_value
@@ -287,7 +279,7 @@ class Simple(pybnb.Problem):
                 print('pen_dM',pen_dM)
                 print('pen_abs',pen_abs)'''
                 #print('a**cost_g',self.alpha_w*cost_g)
-                #print('w_c*cost_c',self.gamma_w*cost_c)
+                print('w_c*cost_c',self.gamma_w*cost_c)
                 #print('a*cost_d',self.alpha_w*cost_d)
                 #print('--------------------------------------------child_value',child_value)
 
