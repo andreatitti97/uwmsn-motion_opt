@@ -233,7 +233,7 @@ def main():
 
                 output_policy, ref_vels, list_c, list_g, list_d  = bns[4],bns[6], bns[7], bns[8], bns[9]
    
-                if auvID == 2:
+                if auvID == 2:#DEBUG
                     pareto_data_c.append(list_c[0])
                     pareto_data_g.append(list_g[0])
                     pareto_data_d.append(list_d[0])

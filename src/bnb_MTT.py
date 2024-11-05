@@ -190,7 +190,8 @@ class Simple(pybnb.Problem):
 
         # Optimization Parameters
         self.value = 0 #initial value objective function 
-        self.DT = header.config.Ts*auvNum*2
+        Ts = header.config.Ts
+        self.DT = Ts*auvNum*2 #optimization time window
         self.choices = []
         self.des_range = header.config.RANGE_TO_TARGET
         self.inf = float("inf")
@@ -204,12 +205,13 @@ class Simple(pybnb.Problem):
         self.alpha_w = header.config.alpha_w
 
         # Variables for path init
-        tmp = np.zeros((self.auvNum,3))
+        '''tmp = np.zeros((self.auvNum,3))
         for i in range(len(tmp)):
             for j in range(3):
-                tmp[i,j] = init_state[j+(i*3)]
+                tmp[i,j] = init_state[j+(i*3)]'''
 
-        self.init_s_state = tmp
+        self.init_s_state = init_state
+    
         self.v_n = v_n
         self.ref_vels = [self.v_n]
         self.AUV_failure = AUV_failure

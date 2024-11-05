@@ -50,15 +50,15 @@ def sig(x,d_max,alpha):
 
     return 1/(1 + np.exp(alpha*(-x+(d_max-config.RANGE_TO_TARGET)/2)))
 
-def computePursuitVel(curr_est,s_pose,d_max):
+def computePursuitVel(curr_est,s_pose,d_max,DT):
 
     predicted_pose = [0,0]
     
     tmp_s_pose = [s_pose[0],s_pose[1],s_pose[2]]
     tmp_curr_est = [curr_est[0],curr_est[1],curr_est[2],curr_est[3]]
     
-    predicted_pose[0] = tmp_curr_est[0] + config.DT*tmp_curr_est[2]
-    predicted_pose[1] = tmp_curr_est[1] + config.DT*tmp_curr_est[3]
+    predicted_pose[0] = tmp_curr_est[0] + DT*tmp_curr_est[2]
+    predicted_pose[1] = tmp_curr_est[1] + DT*tmp_curr_est[3]
 
     eucl_dist = np.sqrt((tmp_curr_est[0]-tmp_s_pose[0])**2+(tmp_curr_est[1]-tmp_s_pose[1])**2)
     epsi = 0 #config.RANGE_TO_TARGET #DISTANZA VOLUTA DAL TARGET
