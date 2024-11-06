@@ -145,7 +145,7 @@ def main():
             # Compute the relevant data structures from the callbacks variable
             #inputPlcy = [sublist[:] for sublist in plcyInt]
 
-            xi_hat = [state[:5] for state in targetsState.values()]
+            xi_hat = [state[1:5] for state in targetsState.values()]
             cov_list = [state[5:] for state in targetsState.values()]
 
             for i in range(acquiredTargets):
@@ -159,9 +159,8 @@ def main():
                           xi_hat,senState,plcyInt, none)
 
             
-            problem = h.bnb.Simple(auvNum, auvID, xi_hat[0], senState, ctrl_set,
-                                        plcyInt, init_state, init_d[0],
-                                        NL, AUV_failure)                                        
+            problem = h.bnb.Simple(auvNum, auvID, acquiredTargets, xi_hat[0], senState, ctrl_set,
+                                        plcyInt, init_state, init_d[0])                                        
             # Solve the optimization problem
             solver = h.bnb.pybnb.Solver()
             # Store the results
@@ -184,8 +183,9 @@ def main():
                 np.savetxt(log_path+'/list_d',pareto_data_d)
             #Formatting the results according to the communication protocol
             msg = [senState[0],senState[1],senState[2]]
-            for i in range(h.config.H+1):
+            for i in range(h.config.H):
                 msg.append(ref_vels[i]) # append the vels for complete policy of intent
+            msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
             # Apply the Forbidden Decision Method
             waypoints = h.frbdDcsMtd(outputPlcy)
             for i in range(h.config.H):

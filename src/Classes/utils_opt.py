@@ -50,23 +50,19 @@ def sig(x,d_max,alpha):
 
     return 1/(1 + np.exp(alpha*(-x+(d_max-config.RANGE_TO_TARGET)/2)))
 
-def computePursuitVel(curr_est,s_pose,d_max,DT):
+def computePursuitVel(curr_est,s_pose,d_max):
 
-    predicted_pose = [0,0]
-    
     tmp_s_pose = [s_pose[0],s_pose[1],s_pose[2]]
     tmp_curr_est = [curr_est[0],curr_est[1],curr_est[2],curr_est[3]]
     
-    predicted_pose[0] = tmp_curr_est[0] + DT*tmp_curr_est[2]
-    predicted_pose[1] = tmp_curr_est[1] + DT*tmp_curr_est[3]
-
     eucl_dist = np.sqrt((tmp_curr_est[0]-tmp_s_pose[0])**2+(tmp_curr_est[1]-tmp_s_pose[1])**2)
-    epsi = 0 #config.RANGE_TO_TARGET #DISTANZA VOLUTA DAL TARGET
+    epsi = config.RANGE_TO_TARGET #DISTANZA VOLUTA DAL TARGET
     
     beta = 1/d_max #coeficente angolare retta per due punti m = y2-y1/x1-x2 
     x = (eucl_dist-epsi)
 
-    v_n = beta*x + np.sqrt((tmp_curr_est[2])**2+(tmp_curr_est[3])**2)
+    v_n = beta*x + np.sqrt((tmp_curr_est[2])**2+(tmp_curr_est[3])**2)#feed forward the estimate
+                                                                    # target vel.
 
     if v_n > config.AUV_MAX_VEL:#saturate desired vel
         v_n = config.AUV_MAX_VEL
