@@ -6,6 +6,7 @@ import numpy as np
 # Import Costum classes
 local_path = pathlib.Path(__file__).parent.resolve()
 pkg_directory = os.path.dirname(os.path.dirname(os.path.dirname(local_path)))
+
 pkg_directory = pkg_directory+'/uwmsn-sim'+'/src'+'/Classes'
 local_directory = os.path.dirname(os.path.dirname(local_path))+'/src'
 
@@ -17,10 +18,17 @@ spec = importlib.util.spec_from_file_location("module.bnb_MTT", local_directory+
 bnb = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bnb)
 
+spec = importlib.util.spec_from_file_location("module.estimator", local_directory+'/Classes/estimator.py')
+estimator_module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(estimator_module)
+
 spec = importlib.util.spec_from_file_location("module.utils", local_directory+'/Classes/utils_opt.py')
 utils = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(utils)
 
+spec = importlib.util.spec_from_file_location("module.sensor", pkg_directory+"/sensor.py")
+sensor = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(sensor)
 
 def frbdDcsMtd(output_policy):
     # Forbidden Decision Method

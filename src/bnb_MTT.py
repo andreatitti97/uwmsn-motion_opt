@@ -16,17 +16,17 @@ spec = importlib.util.spec_from_file_location("module.header", header_file+'/bnb
 header = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(header)
 
-d_max, d_min = header.config.max_distance, header.config.min_distance
-Ts = header.config.Ts
 # Parameters optimization problem
 gamma_w = header.config.gamma_w
 alpha_w = header.config.alpha_w
+d_max, d_min = header.config.max_distance, header.config.min_distance
+Ts = header.config.Ts
 # Network topology
 netTopology = header.config.netTopology
 
 class Simple(pybnb.Problem):
     def __init__(self, auvNum, auvID, targetNum, x_hat, s, ctrl_cmds,
-                    pi_bar, initState, init_d, NL=0, AUV_failure=False):
+                    pi_bar, initState, init_d, acousticParams, k_phi, AUV_failure=False):
                
         # Basic parameters initialization
         self._auvNum = auvNum
@@ -35,15 +35,18 @@ class Simple(pybnb.Problem):
         sensors = []
         for i in range(auvNum):
             sensors.append(header.sensor.Sensor(str(i),1,0,0.000))
-        self.sensors = sensors
-        self._u = ctrl_cmds
+        self._sensors = sensors
+        self._theta = ctrl_cmds
+        self._u = [0,header.config.AUV_MAX_VEL/2,header.config.AUV_MAX_VEL]
         self._auvFailure = AUV_failure
-        self._refVels = []
+        
+        self._hedingChoices = []
+        self._surgeChoices = []
 
         # Optimization Parameters
         self._value = 0 #initial value objective function 
         self._DT = Ts*auvNum*2 #optimization time window
-        self._choices = []
+
         self._desRange = header.config.RANGE_TO_TARGET
         self._bound = float("inf")
 
@@ -55,12 +58,15 @@ class Simple(pybnb.Problem):
         self._d0 = init_d
         self._S0 = initState
         self._netTopology = netTopology[auvID-1]
-        
+        self._gamma_w = header.config.gamma_w
+        self._k_phi = k_phi#is inside a list, TODO consider multi target case
+        self.k_phi_goal = 5#20/len(self._netTopology)# TODO validate costant
+
         #TODO Temporary lists for plotting pareto solution
         self.cost_c, self.cost_g, self.cost_d = [], [], []
 
         # Acoustic environment and modem parameters
-        self.NL = NL
+        self._acousticParams = acousticParams
 
     # Required methods for graph generation and searching
     def sense(self):
@@ -74,87 +80,80 @@ class Simple(pybnb.Problem):
 
     def save_state(self, node):
         
-        node.state = (self._x_hat, self._s_i, self._value, self._bound,
-                        self._choices, self._pi_bar, self._refVels, self.cost_c, self.cost_g, self.cost_d)
+        node.state = (self._x_hat, self._s_i, self._value, self._bound, self._pi_bar,
+                    self._hedingChoices, self._surgeChoices)
 
     def load_state(self, node):
 
-        (self._x_hat, self._s_i, self._value, self._bound,
-            self._choices, self._pi_bar, self._refVels, self.cost_c, self.cost_g, self.cost_d) = node.state
+        (self._x_hat, self._s_i, self._value, self._bound, self._pi_bar,
+        self._hedingChoices, self._surgeChoices) = node.state
 
     def branch(self): #durante il branch devi calcolare le varie realizzazioni quindi simuli qua
 
         cost, x_hat, s, pi_bar = self._value, self._x_hat, self._s_i, self._pi_bar
         
         tmp_v_n = header.utils.computePursuitVel(x_hat,s,self._d0)
-        
-        for i in range(header.config.U):
-            #for j in range(1):#TODO : OPTIMIZE ALSO SURGE
-            
-            x, phi, tmp_s, tmp_pi_bar = self.simulation(self._u[i], 
-                                                        x_hat, self.P, s, self.sensors, 
-                                                        tmp_v_n, self._DT, pi_bar,
-                                                        self._S0, self._auvFailure)
+        self._u[2] = tmp_v_n
 
-            father_value = cost
-            cost_d = self._desRange/((np.sqrt((x[0]-tmp_s[0])**2+(x[1]-tmp_s[1])**2)))  
-            cost_g = 1/header.utils.compute_cost(phi) # in [0,1]
-            cost_c, pen_dm, pen_abs = header.connectivityCost(tmp_pi_bar, tmp_s, self._DT, 
-                                                        self._d0, x, self._desRange,
-                                                        self._auvID, self.NL, self._auvFailure)
+        for i in range(len(self._theta)):
+            for j in range(len(self._u)):#TODO : OPTIMIZE ALSO SURGE
+            
+                tmp_xi, tmp_phi, tmp_s, tmp_pi_bar = self.simulation(self._theta[i],self._u[j],
+                                                            x_hat, self.P, s, pi_bar)
+
+                father_value = cost
+
+                cost_d = self._desRange/((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2)))                             
+                cost_g = 1/header.utils.compute_cost(tmp_phi,cost_d,self._auvID) # in [0,1]
+
+                cost_c, pen_dm, pen_abs = header.applyConstraints(tmp_pi_bar, tmp_xi, tmp_s, self._DT, 
+                                                            self._d0, self._desRange,self._auvID, 
+                                                            self._acousticParams, self._auvFailure)
+                
+                #[cost_g, cost_c] = header.normalizeObjFunc(cost_g,cost_c)
+                if pen_abs == 1.0 or pen_dm == 1.0 or cost_c < 10e-4:
+                    child_value = 0
+                else:
+                    if self._k_phi[0] >= self.k_phi_goal:
+
+                        child_value = father_value + cost_g + self._gamma_w*cost_c
+                    else:
+                        
+                        child_value = father_value + +cost_g + cost_d + self._gamma_w*cost_c
+
+                if self._auvID == 10:
+                    'ADD DEBUG PRINTS HERE'
+                    print('Distance',((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2))))
+                    print('cost_FINAL',cost_g)
+                    print('cost_c',self._gamma_w*cost_c)
                     
-            if cost_d >= 1.0: #to bound the objective w.r.t to the desired range (parameter)
-                cost_d = 1.0 # in [0,1]
 
-            child_value = father_value + (alpha_w)*cost_g + (1-alpha_w)*cost_d  \
-                            #+ self.gamma_w*cost_c 
-            
-            child_value = father_value + cost_g + cost_d  \
-                            #+ self.gamma_w*cost_c
+                    #print('NODE VALUE',child_value)
+                    
+                # Compute the bound according to the proposed algorithm
+                # Update data result
+                #tmp_list_c = self.cost_c + [cost_c]#for plot to remove
+                #tmp_list_g = self.cost_g + [cost_g]
+                headingChoices = self._hedingChoices + [self._theta[i]]
+                surgeChoices = self._surgeChoices + [self._u[j]]
 
-            if pen_abs == 1.0 or pen_dm == 1.0:
-                child_value = 0
+                if len(headingChoices) == header.config.H:
+                    child_value = child_value + 1
 
-            tmp_list_c = self.cost_c + [cost_c]
-            tmp_list_g = self.cost_g + [cost_g]
-            tmp_list_d = self.cost_d + [cost_d]
+                    if self._bound == +float("inf"):# UNIFORM COST SEARCH SETUP
+                        self._bound = child_value
 
-            if self._auvID == 1:
-                'ADD DEBUG PRINTS HERE'
-                '''print('--------------------HORIZON',len(choices))
-                print('----------------------------------------self._value',self._value)
-                print('--------------------father value',father_value)
-                print('pen_dm',pen_dm)
-                print('pen_dM',pen_dM)
-                print('pen_abs',pen_abs)'''
-                #print('a**cost_g',self.alpha_w*cost_g)
-                #print('w_c*cost_c',self.gamma_w*cost_c)
-                #print('a*cost_d',self.alpha_w*cost_d)
-                #print('--------------------------------------------child_value',child_value)
+                    if child_value >= self._bound:
+                        self._bound = child_value
 
-            # Compute the bound according to the proposed algorithm
-            tmp = [self._u[i]]
-            
-            choices = self._choices + tmp
-            tmp_ref_vels = self._refVels + [tmp_v_n]
+                # Branch the tree  
+                child = pybnb.Node()
+                child.state = (tmp_xi, tmp_s, child_value, self._bound, tmp_pi_bar,
+                    headingChoices, surgeChoices)
+                
+                yield child
 
-            if len(choices) == header.config.H:
-                child_value = child_value + 1
-
-                if self._bound == +float("inf"):# UNIFORM COST SEARCH SETUP
-                    self._bound = child_value
-
-                if child_value >= self._bound:
-                    self._bound = child_value
-
-            # Branch the tree  
-            child = pybnb.Node()
-            child.state = (x, tmp_s, child_value, self._bound, choices,
-                    tmp_pi_bar, tmp_ref_vels, tmp_list_c, tmp_list_g, tmp_list_d)
-            
-            yield child
-
-    def beliefPropagation(self, pi_bar, N_i, r_i, s_i, v_n, DT):
+    def beliefPropagation(self, pi_bar, N_i, s_i, r_i, u_i):
         pi_bar_out = []
 
         for i in range(self._auvNum):
@@ -167,12 +166,12 @@ class Simple(pybnb.Problem):
             # Fix the condition to avoid ambiguous truth value evaluation
             if (len(j_pi_bar) > 0 and np.sum(j_pi_bar) != 0) or self._auvID == i + 1:
                 if self._auvID == i + 1:  # Compute the path of the i-th AUV according to the chosen command
-                    ax = np.cos(s_i[2] + r_i) * v_n * DT + s_i[0]
-                    ay = np.sin(s_i[2] + r_i) * v_n * DT + s_i[1]
+                    ax = np.cos(s_i[2] + r_i) * u_i * self._DT + s_i[0]
+                    ay = np.sin(s_i[2] + r_i) * u_i * self._DT + s_i[1]
                     out = [ax, ay, s_i[2] + r_i]
                 else:
-                    ax_j = np.cos(j_pi_bar[2] + j_pi_bar[idx2]) * j_pi_bar[3] * DT + j_pi_bar[0]
-                    ay_j = np.sin(j_pi_bar[2] + j_pi_bar[idx2]) * j_pi_bar[3] * DT + j_pi_bar[1]
+                    ax_j = np.cos(j_pi_bar[2] + j_pi_bar[idx2]) * j_pi_bar[3] * self._DT + j_pi_bar[0]
+                    ay_j = np.sin(j_pi_bar[2] + j_pi_bar[idx2]) * j_pi_bar[3] * self._DT + j_pi_bar[1]
                     N_i[i] = [ax_j, ay_j, j_pi_bar[2] + j_pi_bar[idx2]]
                     out = N_i[i]
 
@@ -196,11 +195,10 @@ class Simple(pybnb.Problem):
 
         return pi_bar_out, N_i, [ax, ay, s_i[2]+r_i]
 
-    def simulation(self, ctrl_input, x_hat, P, s_pose, sensors,
-                v_n, DT, pi_bar, initState, AUV_failure):
+    def simulation(self, delta_theta, delta_u, x_hat, P, s_pose, pi_bar):
         # Initialize data structures and classes
         meas_table = []
-        target = header.target_module.Target(x_hat, DT, P)
+        target = header.target_module.Target(x_hat, self._DT, P)
         estimator = header.estimator_module.Estimation()
 
         # Initialize AUVs state structures
@@ -208,18 +206,20 @@ class Simple(pybnb.Problem):
                 for _ in range(self._auvNum)]
 
         # Propagate the AUVs state
-        pi_bar_out, auvs_xy, s_pose = self.beliefPropagation(pi_bar, auvs_xy, ctrl_input,
-                                                            s_pose, v_n, DT)
+        pi_bar_out, auvs_xy, s_pose = self.beliefPropagation(pi_bar, auvs_xy, s_pose, delta_theta,
+                                                            delta_u)
 
         # Simulate measurements for cost function computation
-        for i, sensor in enumerate(sensors):
-            tmp = s_pose if self._auvID == i + 1 else (auvs_xy[i] if np.any(auvs_xy[i][:3]) else initState[i])
+        for i, sensor in enumerate(self._sensors):
+            tmp = s_pose if self._auvID == i + 1 else (auvs_xy[i] if 
+                                                       np.any(auvs_xy[i][:3]) else self._S0[i])
+            
             measure_, rel_bearing_, meas_pos = sensor.measureBearing(target.x[0], target.x[1], 
                                                                     [tmp[0], tmp[1]], tmp[2])
             meas_table.append([measure_, meas_pos[0], meas_pos[1]])
 
         # Filter out specific measurements based on network topology and/or failure status
-        if AUV_failure == False:
+        if self._auvFailure == False:
             for i in range(self._auvNum):
                 if i+1 not in self._netTopology and i+1 != self._auvID:
                     meas_table.pop(i)

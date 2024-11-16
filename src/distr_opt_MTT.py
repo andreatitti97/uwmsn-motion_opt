@@ -27,7 +27,6 @@ senState = [None, None, None]
 plcyInt = [[] for _ in range(len(AUV_XY))]
 tsMsg, acquiredTargets = 0.0, 0
 
-
 def callbackTstate(data):
     global targetsState, tsMsg, acquiredTargets
 
@@ -66,20 +65,20 @@ def shutdown_cllbk():
     rospy.loginfo('%s|---- OPTIMIZATION '+str(auvID)+': Simulation data saved --> Shutting down ...%s',
                 magenta,none)
 
-def listener(auvID,auvNum):
+def listener(auvID: int,auvNum: int) -> None:
    
     rospy.Subscriber('/'+str(auvID)+'/estimation', Matrix, callbackTstate)
     rospy.Subscriber('vehicle_state_'+str(auvID), numpy_msg(Floats), callbackSstate)
 
     for i in range(auvNum):
-        if i + 1 != auvID:
+        #if i + 1 != auvID:
             # Define a wrapper function to capture the index
-            def create_callback(index):
-                def callback(data):
-                    global plcyInt
-                    plcyInt[index] = data.data
-                return callback
-            rospy.Subscriber('/'+str(i+1)+'/rx_ctrl_policy', numpy_msg(Floats), create_callback(i))
+        def create_callback(index):
+            def callback(data):
+                global plcyInt
+                plcyInt[index] = data.data
+            return callback
+        rospy.Subscriber('/'+str(i+1)+'/rx_ctrl_policy', numpy_msg(Floats), create_callback(i))
 
 def main():
     
@@ -110,11 +109,15 @@ def main():
     sim_time, dt = h.config.TIME_DURATION, h.config.TIME_STEP
     u_max, delta_u, Ts = h.config.u_max, h.config.delta_u, h.config.Ts
     AUV_failure, ctrl_set = h.config.AUV_failure, h.config.ctrl_cmd
+    acousticParams = [h.config.SL,h.config.NL,h.config.DI]
     DT = Ts*auvNum*2 #optimization time window
+    netTopology = h.config.netTopology
+
 
     limit = 0.0 #Compute nodes limit according to RHC with finite memory
+    U = h.config.U*3
     for i in range(h.config.H+1):
-        limit += h.config.U**i
+        limit += U**i
 
     # Initialize polices of intent and inital team state
     init_state = [[] for _ in range(auvNum)]
@@ -145,22 +148,53 @@ def main():
             # Compute the relevant data structures from the callbacks variable
             #inputPlcy = [sublist[:] for sublist in plcyInt]
 
-            xi_hat = [state[1:5] for state in targetsState.values()]
-            cov_list = [state[5:] for state in targetsState.values()]
+            xi_hat = [state[2:6] for state in targetsState.values()]
+            k_phi = [state[0] for state in targetsState.values()]
+            cov_list = [state[6:] for state in targetsState.values()]
+            # TODO REMEMBER THE LABEL!!
+            
+            # Compute the current cost function:    
+            estimator = h.estimator_module.Estimation()
+            sensors, meas_table = [], []
+            for i in range(auvNum):
+                sensors.append(h.sensor.Sensor(str(i),1,0,0.000))
 
             for i in range(acquiredTargets):
                 xi_i = xi_hat[i]
                 if initialized[i] == False:
                     init_d[i] = np.sqrt((xi_i[1]-senState[1])**2+(xi_i[0]-senState[0])**2)
-            
+
+                # Simulate measurements for cost function computation
+                for j, sensor in enumerate(sensors):
+                    if j == auvID + 1:
+                        tmp = [senState[0],senState[1],senState[2]]
+                    else:
+                        tmp = plcyInt[j]
+                    measure_, rel_bearing_, meas_pos = sensor.measureBearing(xi_i[0], xi_i[1], 
+                                                                        [tmp[0], tmp[1]], tmp[2])
+                    meas_table.append([measure_, meas_pos[0], meas_pos[1]])
+                
+                if auvID == 1:
+                    meas_table.pop(2)
+                if auvID == 3:
+                    meas_table.pop(0)
+                
+
+                # Compute the regressor
+                estimator.computeState(meas_table)
+                # Filter out specific measurements based on network topology and/or failure status
+
+                k_phi = h.utils.compute_cost(estimator.phi,1,auvID)
+                meas_table = []
+
             # Initialize the problem
             #rospy.loginfo('%s OPTIMIZATION ID %s STARTING! --> Policy of intent: %s %s',cyan,auvID,inputPlcy,none)
-            rospy.loginfo('%s DEBUG: xi_hat %s senState %s input policy %s %s',cyan,
-                          xi_hat,senState,plcyInt, none)
+            rospy.loginfo('%s DEBUG: cost function %s xi_hat %s senState %s input policy %s %s',cyan,
+                          k_phi,xi_hat,senState,plcyInt, none)
 
             
             problem = h.bnb.Simple(auvNum, auvID, acquiredTargets, xi_hat[0], senState, ctrl_set,
-                                        plcyInt, init_state, init_d[0])                                        
+                                        plcyInt, init_state, init_d[0], acousticParams, [k_phi])                                        
             # Solve the optimization problem
             solver = h.bnb.pybnb.Solver()
             # Store the results
@@ -171,25 +205,25 @@ def main():
 
             avg_nodes.append(nodes), avg_time.append(wall_time)
 
-            outputPlcy, ref_vels, list_c, list_g, list_d  = bns[4],bns[6], bns[7], bns[8], bns[9]
+            headingChoices, surgeChoices = bns[5],bns[6]
 
-            if auvID == 2:
+            '''if auvID == 2:
                 pareto_data_c.append(list_c[0])
-                pareto_data_g.append(list_g[0])
-                pareto_data_d.append(list_d[0])
-
+                pareto_data_g.append(list_g[0])            
                 np.savetxt(log_path+'/list_c',pareto_data_c)
-                np.savetxt(log_path+'/list_d',pareto_data_g)
-                np.savetxt(log_path+'/list_d',pareto_data_d)
+                np.savetxt(log_path+'/list_g',pareto_data_g)'''
+
+            # Apply the Forbidden Decision Method
+            waypoints = h.frbdDcsMtd(headingChoices)
+        
             #Formatting the results according to the communication protocol
             msg = [senState[0],senState[1],senState[2]]
             for i in range(h.config.H):
-                msg.append(ref_vels[i]) # append the vels for complete policy of intent
-            msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
-            # Apply the Forbidden Decision Method
-            waypoints = h.frbdDcsMtd(outputPlcy)
-            for i in range(h.config.H):
                 msg.append(waypoints[i])               
+            msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
+            
+            for i in range(h.config.H):
+                msg.append(surgeChoices[i]) # append the vels for complete policy of intent
             msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
 
             # Ros pub
@@ -197,7 +231,7 @@ def main():
             rospy.loginfo('%s OPTIMIZATION ID %s DONE! --> Output Policy: %s %s',cyan,auvID,msg,none)
             
             # Adapt Online ctrl set
-            old_ctrls.append(outputPlcy[0])
+            old_ctrls.append(headingChoices[0])
             # Adapt online the heading changes
             if len(old_ctrls) == 3:
                 ctrl_set, count_max, count_low, u_max = h.adptCtrlSet(old_ctrls,ctrl_set,

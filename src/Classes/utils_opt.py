@@ -14,7 +14,7 @@ spec = importlib.util.spec_from_file_location("module.config", config_file_dir+'
 config = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(config)
 
-def compute_cost(phi):
+def compute_cost(phi,weight_d,AUV_ID):
 
     length_y = len(phi)
     tmp_phi = np.zeros((length_y,2))
@@ -23,9 +23,12 @@ def compute_cost(phi):
         a = phi[i]
         tmp_phi[i,:] = [a[0],a[1]]
     
-    W = np.zeros((length_y,length_y))
+    W = np.zeros((length_y,length_y))#weight matrix
     for i in range(length_y):
-        W[i,i] = 1.0
+        if i == AUV_ID-1:
+            W[i,i] = weight_d
+        else:
+            W[i,i] = 1
 
     PHI = np.dot(np.transpose(tmp_phi),np.dot(np.linalg.inv(W),tmp_phi))
 
