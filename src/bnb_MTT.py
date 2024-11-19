@@ -34,10 +34,10 @@ class Simple(pybnb.Problem):
         self._targetNum = targetNum
         sensors = []
         for i in range(auvNum):
-            sensors.append(header.sensor.Sensor(str(i),1,0,0.000))
+            sensors.append(header.sensor.Sensor(str(i),1,0,0.0))
         self._sensors = sensors
         self._theta = ctrl_cmds
-        self._u = [0,header.config.AUV_MAX_VEL/2,header.config.AUV_MAX_VEL]
+        self._u = [0.1,header.config.AUV_MAX_VEL/2,header.config.AUV_MAX_VEL]
         self._auvFailure = AUV_failure
         
         self._hedingChoices = []
@@ -60,7 +60,7 @@ class Simple(pybnb.Problem):
         self._netTopology = netTopology[auvID-1]
         self._gamma_w = header.config.gamma_w
         self._k_phi = k_phi#is inside a list, TODO consider multi target case
-        self.k_phi_goal = 5#20/len(self._netTopology)# TODO validate costant
+        self.k_phi_goal = 6#20/len(self._netTopology)# TODO validate costant
 
         #TODO Temporary lists for plotting pareto solution
         self.cost_c, self.cost_g, self.cost_d = [], [], []
@@ -111,21 +111,27 @@ class Simple(pybnb.Problem):
                                                             self._acousticParams, self._auvFailure)
                 
                 #[cost_g, cost_c] = header.normalizeObjFunc(cost_g,cost_c)
-                if pen_abs == 1.0 or pen_dm == 1.0 or cost_c < 10e-4:
+                if pen_abs == 1.0 or pen_dm == 1.0: #or cost_c < 10e-4:
+                    '''print('CONSTRAINED!!')
+                    print('pen_abs',pen_abs)
+                    print('pen_dm',pen_dm)'''
+                    
                     child_value = 0
                 else:
                     if self._k_phi[0] >= self.k_phi_goal:
-
                         child_value = father_value + cost_g + self._gamma_w*cost_c
                     else:
-                        
-                        child_value = father_value + +cost_g + cost_d + self._gamma_w*cost_c
-
-                if self._auvID == 10:
+                        child_value = father_value + 2*cost_d + cost_g + self._gamma_w*cost_c
+                        ''' if self._auvID == 1:
+                            print('OPT also DISTANCE')
+                            print('DISTANCE',((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2))))
+                            child_value = father_value + cost_ + self._gamma_w*cost_c
+                           '''
+                if self._auvID == 3000:
                     'ADD DEBUG PRINTS HERE'
                     print('Distance',((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2))))
                     print('cost_FINAL',cost_g)
-                    print('cost_c',self._gamma_w*cost_c)
+                    print('cost_d',cost_d)
                     
 
                     #print('NODE VALUE',child_value)
@@ -160,40 +166,46 @@ class Simple(pybnb.Problem):
             j_pi_bar = pi_bar[i]
             out = []
 
-            H = int((len(j_pi_bar) - 3) / 2)
-            idx2 = 3 + H
+            H = int((len(j_pi_bar) - 3) / 2)  # Number of horizon steps
+            idx1 = 3 + H  # Index of the first surge delta
 
-            # Fix the condition to avoid ambiguous truth value evaluation
+            # Check if j_pi_bar is valid or if the current AUV should compute its own path
             if (len(j_pi_bar) > 0 and np.sum(j_pi_bar) != 0) or self._auvID == i + 1:
-                if self._auvID == i + 1:  # Compute the path of the i-th AUV according to the chosen command
+                if self._auvID == i + 1:  # Compute the path for the current AUV
                     ax = np.cos(s_i[2] + r_i) * u_i * self._DT + s_i[0]
                     ay = np.sin(s_i[2] + r_i) * u_i * self._DT + s_i[1]
-                    out = [ax, ay, s_i[2] + r_i]
+                    out = [ax, ay, s_i[2] + r_i, r_i, u_i]
                 else:
-                    ax_j = np.cos(j_pi_bar[2] + j_pi_bar[idx2]) * j_pi_bar[3] * self._DT + j_pi_bar[0]
-                    ay_j = np.sin(j_pi_bar[2] + j_pi_bar[idx2]) * j_pi_bar[3] * self._DT + j_pi_bar[1]
-                    N_i[i] = [ax_j, ay_j, j_pi_bar[2] + j_pi_bar[idx2]]
-                    out = N_i[i]
+                    ax_j, ay_j, theta_j = j_pi_bar[0], j_pi_bar[1], j_pi_bar[2]
+                    for h in range(H):
+                        delta_theta_h = j_pi_bar[3 + h]  # Delta theta for step h
+                        delta_surge_h = j_pi_bar[idx1 + h]  # Delta surge for step h
+                        theta_j += delta_theta_h
+                        ax_j += np.cos(theta_j) * delta_surge_h * self._DT
+                        ay_j += np.sin(theta_j) * delta_surge_h * self._DT
+                        out.extend([delta_theta_h, delta_surge_h])  # Append step deltas to output
+
+                    N_i[i] = [ax_j, ay_j, theta_j]
+                    out = [ax_j, ay_j, theta_j] + out
 
                     if self._auvID != i + 1:
-                        j_pi_bar = np.delete(j_pi_bar, idx2)
-                        if len(j_pi_bar) > 3:  # Remove related ref velocity
-                            j_pi_bar = np.delete(j_pi_bar, 3)
+                        # Remove the delta values from j_pi_bar to keep its size consistent
+                        j_pi_bar = np.delete(j_pi_bar, np.s_[3:3 + H])  # Remove delta_theta values
+                        j_pi_bar = np.delete(j_pi_bar, np.s_[idx1 - H:idx1])  # Remove delta_surge values
 
                         for j in range(len(j_pi_bar[3:])):
                             out.append(j_pi_bar[j + 3])
 
-            else:
+            else:  # Default case for invalid j_pi_bar
                 N_i[i] = [0.0, 0.0, 0.0]
-                j_pi_bar = np.delete(j_pi_bar, idx2)
-                if len(j_pi_bar) > 3:  # Remove related ref velocity
-                    j_pi_bar = np.delete(j_pi_bar, 3)
-
+                j_pi_bar = np.delete(j_pi_bar, np.s_[3:3 + H])  # Remove delta_theta values
+                j_pi_bar = np.delete(j_pi_bar, np.s_[idx1 - H:idx1])  # Remove delta_surge values
+                out.extend([0.0, 0.0] * H)  # Default deltas for invalid inputs
                 out.extend([0.0] * len(j_pi_bar))
 
             pi_bar_out.append(out)
 
-        return pi_bar_out, N_i, [ax, ay, s_i[2]+r_i]
+        return pi_bar_out, N_i, [ax, ay, s_i[2] + r_i, r_i, u_i]
 
     def simulation(self, delta_theta, delta_u, x_hat, P, s_pose, pi_bar):
         # Initialize data structures and classes

@@ -214,17 +214,17 @@ def main():
                 np.savetxt(log_path+'/list_g',pareto_data_g)'''
 
             # Apply the Forbidden Decision Method
-            waypoints = h.frbdDcsMtd(headingChoices)
+            headingChoices = h.frbdDcsMtd(headingChoices)
         
             #Formatting the results according to the communication protocol
             msg = [senState[0],senState[1],senState[2]]
             for i in range(h.config.H):
-                msg.append(waypoints[i])               
+                msg.append(headingChoices[i])               
             msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
             
             for i in range(h.config.H):
                 msg.append(surgeChoices[i]) # append the vels for complete policy of intent
-            msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
+            msg.append(0.1) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
 
             # Ros pub
             pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))

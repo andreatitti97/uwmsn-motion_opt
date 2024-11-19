@@ -44,7 +44,7 @@ def applyConstraints(tmp_pi_bar, xi_hat, tmp_s, DT, init_d, desRange, auvID, aco
     old_tmp_positions = []
     loops = len(tmp_pi_bar)
     SL,NL,DI = acousticParams[0],acousticParams[1],acousticParams[2]
-
+    
     # Update xi_hat position incrementally for each loop iteration
     xi_hat[:2] += DT * xi_hat[2:4]
     tmp_d_target = np.linalg.norm([xi_hat[1] - tmp_s[1], xi_hat[0] - tmp_s[0]])
@@ -58,11 +58,9 @@ def applyConstraints(tmp_pi_bar, xi_hat, tmp_s, DT, init_d, desRange, auvID, aco
         j_pi_bar = tmp_pi_bar[i]
         if len(j_pi_bar) >= 5 and i != auvID - 1:
             H = (len(j_pi_bar) - 3) // 2
-            idx2 = 3 + H
-
             # Calculate AUV's relative position
-            tmp_x = np.cos(j_pi_bar[2] + j_pi_bar[idx2]) * j_pi_bar[3] * DT + j_pi_bar[0]
-            tmp_y = np.sin(j_pi_bar[2] + j_pi_bar[idx2]) * j_pi_bar[3] * DT + j_pi_bar[1]
+            tmp_x = np.cos(j_pi_bar[2] + j_pi_bar[3]) * j_pi_bar[4] * DT + j_pi_bar[0]
+            tmp_y = np.sin(j_pi_bar[2] + j_pi_bar[3]) * j_pi_bar[4] * DT + j_pi_bar[1]
             d_ij = np.linalg.norm([tmp_y - tmp_s[1], tmp_x - tmp_s[0]])
             old_tmp_positions.append((tmp_x, tmp_y))
 
