@@ -8,6 +8,11 @@ import rospy
 from rospy_tutorials.msg import Floats
 from rospy.numpy_msg import numpy_msg
 from uwmsn_msgs.msg import Matrix
+# Module std:out
+from contextlib import redirect_stdout
+import io
+
+import time
 
 # Load the h file as a Python module 
 pkg_directory = os.path.dirname(os.path.dirname(pathlib.Path(__file__).parent.resolve()))
@@ -189,8 +194,8 @@ def main():
 
             # Initialize the problem
             #rospy.loginfo('%s OPTIMIZATION ID %s STARTING! --> Policy of intent: %s %s',cyan,auvID,inputPlcy,none)
-            rospy.loginfo('%s DEBUG: cost function %s xi_hat %s senState %s input policy %s %s',cyan,
-                          k_phi,xi_hat,senState,plcyInt, none)
+            #rospy.loginfo('%s DEBUG: cost function %s xi_hat %s senState %s input policy %s %s',cyan,
+                          #k_phi,xi_hat,senState,plcyInt, none)
 
             
             problem = h.bnb.Simple(auvNum, auvID, acquiredTargets, xi_hat[0], senState, ctrl_set,
@@ -198,9 +203,13 @@ def main():
             # Solve the optimization problem
             solver = h.bnb.pybnb.Solver()
             # Store the results
-            res = solver.solve(problem,queue_strategy="breadth",
-                                node_limit=limit,relative_gap=0.001)
-                    
+
+            start = time.time()
+            with io.StringIO() as buf, redirect_stdout(buf):
+                res = solver.solve(problem,queue_strategy="breadth",
+                                    node_limit=limit,relative_gap=0.001)
+            stop = time.time()
+            rospy.loginfo('%s Optimization AUV%s done, elapsed time (s): %s %s',cyan,auvID,stop-start,none)
             bns, wall_time, nodes = res.best_node.state, res.wall_time, res.nodes
 
             avg_nodes.append(nodes), avg_time.append(wall_time)
@@ -218,13 +227,18 @@ def main():
         
             #Formatting the results according to the communication protocol
             msg = [senState[0],senState[1],senState[2]]
-            for i in range(h.config.H):
-                msg.append(headingChoices[i])               
-            msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
-            
-            for i in range(h.config.H):
-                msg.append(surgeChoices[i]) # append the vels for complete policy of intent
-            msg.append(0.1) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
+            if len(headingChoices) == h.config.H:
+                for i in range(h.config.H):
+                    msg.append(headingChoices[i])               
+                msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
+                for i in range(h.config.H):
+                    msg.append(surgeChoices[i]) # append the vels for complete policy of intent
+                msg.append(0.1) 
+            else:
+                rospy.logwarn('UNFEASIBLE OPTIMIZATION - idle state')
+                for i in range((h.config.H+1)*2):
+                    msg.append(0.0)
+            #HEURISTIC FUNCTION to complete the POLICY OF INTENT
 
             # Ros pub
             pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))

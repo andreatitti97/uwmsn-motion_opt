@@ -50,7 +50,7 @@ def applyConstraints(tmp_pi_bar, xi_hat, tmp_s, DT, init_d, desRange, auvID, aco
     tmp_d_target = np.linalg.norm([xi_hat[1] - tmp_s[1], xi_hat[0] - tmp_s[0]])
 
     # Penalties for target distance constraints
-    if tmp_d_target > (init_d *3.0)/2.0 or tmp_d_target <= desRange:
+    if tmp_d_target > (2*init_d) or tmp_d_target <= desRange/2:
         pen_abs = 1.0
 
     # Compute expected signal to noise ratio between local AUV and his neighbours

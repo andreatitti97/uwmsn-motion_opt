@@ -37,7 +37,7 @@ class Simple(pybnb.Problem):
             sensors.append(header.sensor.Sensor(str(i),1,0,0.0))
         self._sensors = sensors
         self._theta = ctrl_cmds
-        self._u = [0.1,header.config.AUV_MAX_VEL/2,header.config.AUV_MAX_VEL]
+        self._u = [0.2,header.config.AUV_MAX_VEL/2,header.config.AUV_MAX_VEL]
         self._auvFailure = AUV_failure
         
         self._hedingChoices = []
@@ -111,22 +111,24 @@ class Simple(pybnb.Problem):
                                                             self._acousticParams, self._auvFailure)
                 
                 #[cost_g, cost_c] = header.normalizeObjFunc(cost_g,cost_c)
-                if pen_abs == 1.0 or pen_dm == 1.0: #or cost_c < 10e-4:
+                if pen_abs == 1.0:# or pen_dm == 1.0: #or cost_c < 10e-4:
                     '''print('CONSTRAINED!!')
                     print('pen_abs',pen_abs)
                     print('pen_dm',pen_dm)'''
                     
                     child_value = 0
                 else:
-                    if self._k_phi[0] >= self.k_phi_goal:
+                    child_value = father_value + 0.5*cost_d + cost_g + self._gamma_w*cost_c
+                    '''if self._k_phi[0] >= self.k_phi_goal:
                         child_value = father_value + cost_g + self._gamma_w*cost_c
                     else:
-                        child_value = father_value + 2*cost_d + cost_g + self._gamma_w*cost_c
-                        ''' if self._auvID == 1:
-                            print('OPT also DISTANCE')
-                            print('DISTANCE',((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2))))
-                            child_value = father_value + cost_ + self._gamma_w*cost_c
-                           '''
+                        child_value = father_value + 2*cost_d + cost_g + self._gamma_w*cost_c'''
+                    
+                    ''' if self._auvID == 1:
+                        print('OPT also DISTANCE')
+                        print('DISTANCE',((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2))))
+                        child_value = father_value + cost_ + self._gamma_w*cost_c
+                        '''
                 if self._auvID == 3000:
                     'ADD DEBUG PRINTS HERE'
                     print('Distance',((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2))))
