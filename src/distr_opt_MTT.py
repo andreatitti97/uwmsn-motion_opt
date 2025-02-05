@@ -179,10 +179,10 @@ def main():
                                                                         [tmp[0], tmp[1]], tmp[2])
                     meas_table.append([measure_, meas_pos[0], meas_pos[1]])
                 
-                if auvID == 1:
+                '''if auvID == 1:
                     meas_table.pop(2)
                 if auvID == 3:
-                    meas_table.pop(0)
+                    meas_table.pop(0)'''
                 
 
                 # Compute the regressor
@@ -193,11 +193,8 @@ def main():
                 meas_table = []
 
             # Initialize the problem
-            #rospy.loginfo('%s OPTIMIZATION ID %s STARTING! --> Policy of intent: %s %s',cyan,auvID,inputPlcy,none)
-            #rospy.loginfo('%s DEBUG: cost function %s xi_hat %s senState %s input policy %s %s',cyan,
-                          #k_phi,xi_hat,senState,plcyInt, none)
+            rospy.loginfo('%s OPTIMIZATION ID %s STARTING! --> Policy of intent: %s %s',cyan,auvID,plcyInt,none)
 
-            
             problem = h.bnb.Simple(auvNum, auvID, acquiredTargets, xi_hat[0], senState, ctrl_set,
                                         plcyInt, init_state, init_d[0], acousticParams, [k_phi])                                        
             # Solve the optimization problem
@@ -242,7 +239,7 @@ def main():
 
             # Ros pub
             pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
-            rospy.loginfo('%s OPTIMIZATION ID %s DONE! --> Output Policy: %s %s',cyan,auvID,msg,none)
+            #rospy.loginfo('%s OPTIMIZATION ID %s DONE! --> Output Policy: %s %s',cyan,auvID,msg,none)
             
             # Adapt Online ctrl set
             old_ctrls.append(headingChoices[0])

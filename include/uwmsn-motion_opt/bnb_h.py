@@ -83,14 +83,9 @@ def applyConstraints(tmp_pi_bar, xi_hat, tmp_s, DT, init_d, desRange, auvID, aco
 
     # Construct Laplacian matrix with calculated SNR values
     laplacian = np.zeros((loops, loops))
-    '''laplacian[0, 1] = laplacian[1, 0] = -snr[0]
-    laplacian[1, 1] = snr[0] + (snr[1] if len(snr) > 1 else 0)
-    if len(snr) > 1:
-        laplacian[2, 2] = snr[1]
-        laplacian[1, 2] = laplacian[2, 1] = -snr[1]
-'''
     snr = [snr[i]/config.SNR_ub for i in range(len(snr))]
     laplacian = np.zeros((loops,loops))
+    
     laplacian[0,1] = -snr[0]
     laplacian[1,0] = -snr[0]
     laplacian[0,2] = 0
