@@ -193,7 +193,7 @@ def main():
                 meas_table = []
 
             # Initialize the problem
-            rospy.loginfo('%s OPTIMIZATION ID %s STARTING! --> Policy of intent: %s %s',cyan,auvID,plcyInt,none)
+            #rospy.loginfo('%s OPTIMIZATION ID %s STARTING! --> Policy of intent: %s %s',cyan,auvID,plcyInt,none)
 
             problem = h.bnb.Simple(auvNum, auvID, acquiredTargets, xi_hat[0], senState, ctrl_set,
                                         plcyInt, init_state, init_d[0], acousticParams, [k_phi])                                        
@@ -206,7 +206,7 @@ def main():
                 res = solver.solve(problem,queue_strategy="breadth",
                                     node_limit=limit,relative_gap=0.001)
             stop = time.time()
-            rospy.loginfo('%s Optimization AUV%s done, elapsed time (s): %s %s',cyan,auvID,stop-start,none)
+            rospy.loginfo('%s Optimization AUV%s done, elapsed time (s): %s. %s',cyan,auvID,stop-start,none)
             bns, wall_time, nodes = res.best_node.state, res.wall_time, res.nodes
 
             avg_nodes.append(nodes), avg_time.append(wall_time)
@@ -239,7 +239,6 @@ def main():
 
             # Ros pub
             pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
-            #rospy.loginfo('%s OPTIMIZATION ID %s DONE! --> Output Policy: %s %s',cyan,auvID,msg,none)
             
             # Adapt Online ctrl set
             old_ctrls.append(headingChoices[0])

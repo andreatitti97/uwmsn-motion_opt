@@ -57,7 +57,7 @@ def applyConstraints(tmp_pi_bar, xi_hat, tmp_s, DT, init_d, desRange, auvID, aco
     for i in range(loops):
         j_pi_bar = tmp_pi_bar[i]
         if len(j_pi_bar) >= 5 and i != auvID - 1:
-            H = (len(j_pi_bar) - 3) // 2
+            
             # Calculate AUV's relative position
             tmp_x = np.cos(j_pi_bar[2] + j_pi_bar[3]) * j_pi_bar[4] * DT + j_pi_bar[0]
             tmp_y = np.sin(j_pi_bar[2] + j_pi_bar[3]) * j_pi_bar[4] * DT + j_pi_bar[1]

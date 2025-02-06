@@ -110,8 +110,7 @@ class Simple(pybnb.Problem):
                                                             self._d0, self._desRange,self._auvID, 
                                                             self._acousticParams, self._auvFailure)
                 
-                if  pen_dm == 1.0:
-
+                if  pen_dm == 1.0 or pen_abs == 1.0:
                     child_value = 0
                 else:
                     #child_value = father_value + cost_d + cost_g + self._gamma_w*cost_c
@@ -119,7 +118,8 @@ class Simple(pybnb.Problem):
                         child_value = father_value + cost_g + self._gamma_w*cost_c
                     else:
                         child_value = father_value + 2*cost_d + cost_g + self._gamma_w*cost_c
-
+                    child_value = father_value + cost_d + cost_g + self._gamma_w*cost_c
+                    
                 if self._auvID == 3000:
                     'ADD DEBUG PRINTS HERE'
 
