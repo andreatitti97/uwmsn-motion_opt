@@ -115,7 +115,7 @@ def main():
     u_max, delta_u, Ts = h.config.u_max, h.config.delta_u, h.config.Ts
     AUV_failure, ctrl_set = h.config.AUV_failure, h.config.ctrl_cmd
     acousticParams = [h.config.SL,h.config.NL,h.config.DI]
-    DT = Ts*auvNum*2 #optimization time window
+    DT = Ts*auvNum+60 #optimization time window
     netTopology = h.config.netTopology
 
 

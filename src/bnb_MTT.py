@@ -23,6 +23,8 @@ d_max, d_min = header.config.max_distance, header.config.min_distance
 Ts = header.config.Ts
 # Network topology
 netTopology = header.config.netTopology
+import pybnb
+import numpy as np
 
 class Simple(pybnb.Problem):
     def __init__(self, auvNum, auvID, targetNum, x_hat, s, ctrl_cmds,
@@ -95,6 +97,8 @@ class Simple(pybnb.Problem):
         tmp_v_n = header.utils.computePursuitVel(x_hat,s,self._d0)
         self._u[2] = tmp_v_n
 
+        found_child = False  # Track if any valid children are generated
+
         for i in range(len(self._theta)):
             for j in range(len(self._u)):#TODO : OPTIMIZE ALSO SURGE
             
@@ -111,13 +115,13 @@ class Simple(pybnb.Problem):
                                                             self._acousticParams, self._auvFailure)
                 
                 if  pen_dm == 1.0 or pen_abs == 1.0:
-                    child_value = 0
+                    continue     
                 else:
-                    #child_value = father_value + cost_d + cost_g + self._gamma_w*cost_c
+                    
                     if self._k_phi[0] >= self.k_phi_goal:
                         child_value = father_value + cost_g + self._gamma_w*cost_c
                     else:
-                        child_value = father_value + 2*cost_d + cost_g + self._gamma_w*cost_c
+                        child_value = father_value + cost_d + cost_g + self._gamma_w*cost_c
                     child_value = father_value + cost_d + cost_g + self._gamma_w*cost_c
                     
                 if self._auvID == 3000:
@@ -126,8 +130,36 @@ class Simple(pybnb.Problem):
                 # Compute the bound according to the proposed algorithm
                 # Update data result
 
+               
+                # **Compute an upper bound estimate**
+                # Since the cost is additive, we estimate the best possible completion cost.
+                # Assuming future costs are at least cost_d (best-case scenario).
+                remaining_steps = header.config.H - len(self._hedingChoices)
+                
+
+                # Estimate the minimal possible cost per step
+                min_cost_d = 1  # Best-case distance cost
+                min_cost_g = 1  # Best possible gain cost (assuming perfect efficiency)
+                min_cost_c = 0  # No constraint violations
+
+                # Best possible future cost estimate
+                future_best_case = remaining_steps * (min_cost_d + min_cost_g + self._gamma_w * min_cost_c)
+
+                # Compute the upper bound
+                upper_bound = child_value + future_best_case
+
+                # Prune if upper bound is worse than the best solution found so far
+                '''if upper_bound <= self._bound:
+                    continue  # Skip this branch'''
+
+                # Update bound if this is a better solution
+                #self._bound = max(self._bound, child_value)
+
+                # Generate new heading and surge choices
                 headingChoices = self._hedingChoices + [self._theta[i]]
                 surgeChoices = self._surgeChoices + [self._u[j]]
+
+        
 
                 if len(headingChoices) == header.config.H:
                     child_value = child_value + 1
@@ -144,6 +176,9 @@ class Simple(pybnb.Problem):
                     headingChoices, surgeChoices)
                 
                 yield child
+        if not found_child:
+            self._bound = cost  # Prevent infinite looping with no children
+
 
     def beliefPropagation(self, pi_bar, N_i, s_i, r_i, u_i):
         pi_bar_out = []

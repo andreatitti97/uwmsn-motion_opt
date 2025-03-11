@@ -61,6 +61,7 @@ def applyConstraints(tmp_pi_bar, xi_hat, tmp_s, DT, init_d, desRange, auvID, aco
             # Calculate AUV's relative position
             tmp_x = np.cos(j_pi_bar[2] + j_pi_bar[3]) * j_pi_bar[4] * DT + j_pi_bar[0]
             tmp_y = np.sin(j_pi_bar[2] + j_pi_bar[3]) * j_pi_bar[4] * DT + j_pi_bar[1]
+            #COMPUTE EXPECTED RELATIVE DISTANCES - YOU CAN USE THEM IN THE CONTRO LOOP!!!!!!
             d_ij = np.linalg.norm([tmp_y - tmp_s[1], tmp_x - tmp_s[0]])
             old_tmp_positions.append((tmp_x, tmp_y))
 
