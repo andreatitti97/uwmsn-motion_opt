@@ -61,6 +61,7 @@ class Simple(pybnb.Problem):
         self._S0 = initState
         self._netTopology = netTopology[auvID-1]
         self._gamma_w = header.config.gamma_w
+        self._alpha_w = header.config.alpha_w
         self._k_phi = k_phi#is inside a list, TODO consider multi target case
         self.k_phi_goal = 6#20/len(self._netTopology)# TODO validate costant
 
@@ -113,7 +114,7 @@ class Simple(pybnb.Problem):
                 cost_c, pen_dm, pen_abs = header.applyConstraints(tmp_pi_bar, tmp_xi, tmp_s, self._DT, 
                                                             self._d0, self._desRange,self._auvID, 
                                                             self._acousticParams, self._auvFailure)
-                
+
                 if  pen_dm == 1.0 or pen_abs == 1.0:
                     continue     
                 else:
@@ -122,6 +123,7 @@ class Simple(pybnb.Problem):
                         child_value = father_value + cost_g + self._gamma_w*cost_c
                     else:
                         child_value = father_value + cost_d + cost_g + self._gamma_w*cost_c
+
                     child_value = father_value + cost_d + cost_g + self._gamma_w*cost_c
                     
                 if self._auvID == 3000:

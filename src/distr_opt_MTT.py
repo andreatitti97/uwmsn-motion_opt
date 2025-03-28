@@ -196,7 +196,7 @@ def main():
             #rospy.loginfo('%s OPTIMIZATION ID %s STARTING! --> Policy of intent: %s %s',cyan,auvID,plcyInt,none)
 
             problem = h.bnb.Simple(auvNum, auvID, acquiredTargets, xi_hat[0], senState, ctrl_set,
-                                        plcyInt, init_state, init_d[0], acousticParams, [k_phi])                                        
+                                        plcyInt, init_state, init_d[0], acousticParams, [k_phi], AUV_failure)                                        
             # Solve the optimization problem
             solver = h.bnb.pybnb.Solver()
             # Store the results
@@ -230,7 +230,7 @@ def main():
                 msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
                 for i in range(h.config.H):
                     msg.append(surgeChoices[i]) # append the vels for complete policy of intent
-                msg.append(0.1) 
+                msg.append(surgeChoices[-1]) 
             else:
                 rospy.logwarn('UNFEASIBLE OPTIMIZATION - idle state')
                 for i in range((h.config.H+1)*2):
@@ -241,7 +241,8 @@ def main():
             pub_ctrl_policy.publish(np.array(msg,dtype=np.float32))
             
             # Adapt Online ctrl set
-            old_ctrls.append(headingChoices[0])
+            if len(headingChoices) > 1:
+                old_ctrls.append(headingChoices[0])
             # Adapt online the heading changes
             if len(old_ctrls) == 3:
                 ctrl_set, count_max, count_low, u_max = h.adptCtrlSet(old_ctrls,ctrl_set,

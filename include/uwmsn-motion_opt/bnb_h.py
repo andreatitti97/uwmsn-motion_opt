@@ -85,18 +85,25 @@ def applyConstraints(tmp_pi_bar, xi_hat, tmp_s, DT, init_d, desRange, auvID, aco
     # Construct Laplacian matrix with calculated SNR values
     laplacian = np.zeros((loops, loops))
     snr = [snr[i]/config.SNR_ub for i in range(len(snr))]
-    laplacian = np.zeros((loops,loops))
-    
-    laplacian[0,1] = -snr[0]
-    laplacian[1,0] = -snr[0]
-    laplacian[0,2] = 0
-    laplacian[2,0] = 0
+     
+    if AUV_failure == False:
+        laplacian[0,1] = -snr[0]
+        laplacian[1,0] = -snr[0]
+        laplacian[0,2] = -snr[2] #TODO CHECK THIS!!
+        laplacian[2,0] = -snr[2]
 
-    laplacian[0,0] = snr[0]
-    laplacian[1,1] = snr[0]+snr[1]
-    laplacian[2,2] = snr[1]
-    laplacian[1,2] = -snr[1]
-    laplacian[2,1] = -snr[1]
+        laplacian[0,0] = snr[0]+snr[1]+snr[2]
+        laplacian[1,1] = snr[0]+snr[1]+snr[2]
+        laplacian[2,2] = snr[0]+snr[1]+snr[2]
+        laplacian[1,2] = -snr[1]
+        laplacian[2,1] = -snr[1]
+    else:
+        #TODO generaize, for now remove AUV2
+        laplacian = np.zeros((2, 2))
+        laplacian[0,0] = snr[0]
+        laplacian[1,1] = snr[0]
+        laplacian[0,1] = -snr[0]
+        laplacian[1,0] = -snr[0]
 
     # Compute SVD to get max singular value
     _, S, _ = np.linalg.svd(laplacian)
