@@ -63,7 +63,7 @@ class Simple(pybnb.Problem):
         self._gamma_w = header.config.gamma_w
         self._alpha_w = header.config.alpha_w
         self._k_phi = k_phi#is inside a list, TODO consider multi target case
-        self.k_phi_goal = 6#20/len(self._netTopology)# TODO validate costant
+        self.k_phi_goal = 5#20/len(self._netTopology)# TODO validate costant
 
         #TODO Temporary lists for plotting pareto solution
         self.cost_c, self.cost_g, self.cost_d = [], [], []
@@ -119,12 +119,10 @@ class Simple(pybnb.Problem):
                     continue     
                 else:
                     
-                    if self._k_phi[0] >= self.k_phi_goal:
-                        child_value = father_value + cost_g + self._gamma_w*cost_c
-                    else:
-                        child_value = father_value + cost_d + cost_g + self._gamma_w*cost_c
+                    if self._k_phi[0] <= self.k_phi_goal:
+                        self._alpha_w = 0.4
 
-                    child_value = father_value + cost_d + cost_g + self._gamma_w*cost_c
+                    child_value = father_value + (1-self._alpha_w)*cost_d + self._alpha_w*cost_g + self._gamma_w*cost_c
                     
                 if self._auvID == 3000:
                     'ADD DEBUG PRINTS HERE'

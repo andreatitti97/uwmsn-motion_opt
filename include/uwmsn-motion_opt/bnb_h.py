@@ -43,73 +43,69 @@ def applyConstraints(tmp_pi_bar, xi_hat, tmp_s, DT, init_d, desRange, auvID, aco
     snr = []
     old_tmp_positions = []
     loops = len(tmp_pi_bar)
-    SL,NL,DI = acousticParams[0],acousticParams[1],acousticParams[2]
+    SL, NL, DI = acousticParams[0], acousticParams[1], acousticParams[2]
     
     # Update xi_hat position incrementally for each loop iteration
     xi_hat[:2] += DT * xi_hat[2:4]
     tmp_d_target = np.linalg.norm([xi_hat[1] - tmp_s[1], xi_hat[0] - tmp_s[0]])
 
-    # Penalties for target distance constraints
-    if tmp_d_target > (2*init_d) or tmp_d_target <= desRange/2:
+    # Penalty for exceeding target distance constraints
+    if tmp_d_target > (2 * init_d) or tmp_d_target <= desRange / 2:
+        print('auvID Penalty Distance', auvID)
         pen_abs = 1.0
 
-    # Compute expected signal to noise ratio between local AUV and his neighbours
+    # Compute expected SNR between the local AUV and its neighbors
     for i in range(loops):
         j_pi_bar = tmp_pi_bar[i]
         if len(j_pi_bar) >= 5 and i != auvID - 1:
             
-            # Calculate AUV's relative position
+            # Compute predicted position of neighbor
             tmp_x = np.cos(j_pi_bar[2] + j_pi_bar[3]) * j_pi_bar[4] * DT + j_pi_bar[0]
             tmp_y = np.sin(j_pi_bar[2] + j_pi_bar[3]) * j_pi_bar[4] * DT + j_pi_bar[1]
-            #COMPUTE EXPECTED RELATIVE DISTANCES - YOU CAN USE THEM IN THE CONTRO LOOP!!!!!!
             d_ij = np.linalg.norm([tmp_y - tmp_s[1], tmp_x - tmp_s[0]])
             old_tmp_positions.append((tmp_x, tmp_y))
 
-            # Calculate transmission loss and SNR
+            # Compute transmission loss and SNR
             TL = 20 * np.log10(d_ij) + (d_ij * alphaFunc(f) * 1e-3)
             tmp_SNR = SL - TL - NL + DI
             snr.append(tmp_SNR if config.SNR_lb < tmp_SNR < config.SNR_ub and d_ij > 0 else 0)
 
             # Collision avoidance constraint
-            if (auvID == 1 and i == 1) or (auvID == 2 and i != 1) or (auvID == 3 and i == 1):
-                if d_ij <= d_min:
-                    pen_dm = 1.0
+            if d_ij <= d_min:
+                print('auvID Penalty Safety', auvID)
+                pen_dm = 1.0
 
-    # Calculate pairwise SNR between AUVs that are not the local one using the policies of intent
-    if len(old_tmp_positions) > 1:
-        d_jj = np.linalg.norm(np.subtract(*old_tmp_positions[:2]))
-        TL = 20 * np.log10(d_jj) + (d_jj * alphaFunc(f) * 1e-3)
-        tmp_SNR = (SL - TL - NL + DI)
-        snr.append(tmp_SNR if config.SNR_lb < tmp_SNR < config.SNR_ub and d_ij > 0 else 0)
+    # Compute pairwise SNR between AUVs using the propagated positions
+    adj_matrix = np.zeros((loops, loops))  # Initialize adjacency matrix
+    for i in range(len(old_tmp_positions)):
+        for j in range(i + 1, len(old_tmp_positions)):  # Avoid redundant calculations
+            d_ij = np.linalg.norm(np.subtract(old_tmp_positions[i], old_tmp_positions[j]))
+            TL = 20 * np.log10(d_ij) + (d_ij * alphaFunc(f) * 1e-3)
+            tmp_SNR = SL - TL - NL + DI
+            if config.SNR_lb < tmp_SNR < config.SNR_ub and d_ij > 0:
+                adj_matrix[i, j] = -tmp_SNR / config.SNR_ub
+                adj_matrix[j, i] = adj_matrix[i, j]  # Symmetric matrix
 
-    # Construct Laplacian matrix with calculated SNR values
-    laplacian = np.zeros((loops, loops))
-    snr = [snr[i]/config.SNR_ub for i in range(len(snr))]
-     
-    if AUV_failure == False:
-        laplacian[0,1] = -snr[0]
-        laplacian[1,0] = -snr[0]
-        laplacian[0,2] = -snr[2] #TODO CHECK THIS!!
-        laplacian[2,0] = -snr[2]
+    # Compute the degree matrix
+    degree_matrix = np.diag(np.abs(adj_matrix).sum(axis=1))
 
-        laplacian[0,0] = snr[0]+snr[1]+snr[2]
-        laplacian[1,1] = snr[0]+snr[1]+snr[2]
-        laplacian[2,2] = snr[0]+snr[1]+snr[2]
-        laplacian[1,2] = -snr[1]
-        laplacian[2,1] = -snr[1]
+    # Compute the Laplacian matrix
+    laplacian = degree_matrix - adj_matrix
+
+    # Compute singular values
+    singular_values = np.linalg.svd(laplacian, compute_uv=False)
+
+    # Extract the second smallest singular value
+    if len(singular_values) > 1:
+        sigma_2 = np.sort(singular_values)[1]  # Second smallest
     else:
-        #TODO generaize, for now remove AUV2
-        laplacian = np.zeros((2, 2))
-        laplacian[0,0] = snr[0]
-        laplacian[1,1] = snr[0]
-        laplacian[0,1] = -snr[0]
-        laplacian[1,0] = -snr[0]
+        sigma_2 = 0  # Default if only one singular value exists
 
     # Compute SVD to get max singular value
-    _, S, _ = np.linalg.svd(laplacian)
-    max_sigma = max(S[1], 0)  # Ensure non-negative sigma for graph connectivity
+    #_, S, _ = np.linalg.svd(laplacian)
+    #sigma2 = max(S[1], 0)  # Ensure non-negative sigma for graph connectivity
 
-    return max_sigma, pen_dm, pen_abs
+    return sigma_2, pen_dm, pen_abs
 
 def normalizeObjFunc(cost2,cost1):#g and c
     if cost1 > 10e-6:

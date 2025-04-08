@@ -81,7 +81,7 @@ def listener(auvID: int,auvNum: int) -> None:
         def create_callback(index):
             def callback(data):
                 global plcyInt
-                plcyInt[index] = data.data
+                plcyInt[index] = list(data.data)
             return callback
         rospy.Subscriber('/'+str(i+1)+'/rx_ctrl_policy', numpy_msg(Floats), create_callback(i))
 
@@ -112,7 +112,7 @@ def main():
 
     # Load simulation parames from config file
     sim_time, dt = h.config.TIME_DURATION, h.config.TIME_STEP
-    u_max, delta_u, Ts = h.config.u_max, h.config.delta_u, h.config.Ts
+    u_max, delta_u, Ts, H = h.config.u_max, h.config.delta_u, h.config.Ts, h.config.H
     AUV_failure, ctrl_set = h.config.AUV_failure, h.config.ctrl_cmd
     acousticParams = [h.config.SL,h.config.NL,h.config.DI]
     DT = Ts*auvNum+60 #optimization time window
@@ -121,13 +121,13 @@ def main():
 
     limit = 0.0 #Compute nodes limit according to RHC with finite memory
     U = h.config.U*3
-    for i in range(h.config.H+1):
+    for i in range(H+1):
         limit += U**i
 
     # Initialize polices of intent and inital team state
     init_state = [[] for _ in range(auvNum)]
     for i in range(auvNum):
-        tmp = [AUV_XY[i,j] for j in range(3)]+[0.0]*((h.config.H + 1) * 2)
+        tmp = [AUV_XY[i,j] for j in range(3)]+[0.0]*((H + 1) * 2)
         plcyInt[i] = tmp
         init_state[i] = tmp[0:3]
         
@@ -140,10 +140,8 @@ def main():
     rospy.sleep(1)
     while not rospy.is_shutdown():
 
-        if t > sim_time/2:# for changing noise level during the sim.
-            NL = h.config.NL
-        else:
-            NL = h.config.NL
+        if t > sim_time/4:# for changing noise level during the sim.
+            acousticParams[1] = 10#70
 
         if t > sim_time/2:#to simulate AUV failure during the sim.
             AUV_failure = True
@@ -195,6 +193,18 @@ def main():
             # Initialize the problem
             #rospy.loginfo('%s OPTIMIZATION ID %s STARTING! --> Policy of intent: %s %s',cyan,auvID,plcyInt,none)
 
+            for i in range(auvNum):
+                if i != auvID:
+                    delta_t = t - plcyInt[i][-1]  # Time elapsed since policy creation
+                    
+                    # Compute how many control steps have already been executed
+                    steps_applied = min(int(delta_t // DT), H - 1)  # Ensure we stay within bounds
+                    
+                    # Compute updated position using the appropriate heading and surge command
+                    plcyInt[i][0] += np.cos(plcyInt[i][2] + plcyInt[i][3 + steps_applied]) * plcyInt[i][3 + H + steps_applied] * delta_t
+                    plcyInt[i][1] += np.sin(plcyInt[i][2] + plcyInt[i][3 + steps_applied]) * plcyInt[i][3 + H + steps_applied] * delta_t
+
+
             problem = h.bnb.Simple(auvNum, auvID, acquiredTargets, xi_hat[0], senState, ctrl_set,
                                         plcyInt, init_state, init_d[0], acousticParams, [k_phi], AUV_failure)                                        
             # Solve the optimization problem
@@ -224,16 +234,16 @@ def main():
         
             #Formatting the results according to the communication protocol
             msg = [senState[0],senState[1],senState[2]]
-            if len(headingChoices) == h.config.H:
-                for i in range(h.config.H):
+            if len(headingChoices) == H:
+                for i in range(H):
                     msg.append(headingChoices[i])               
                 msg.append(0.0) #HEURISTIC FUNCTION to complete the POLICY OF INTENT
-                for i in range(h.config.H):
+                for i in range(H):
                     msg.append(surgeChoices[i]) # append the vels for complete policy of intent
                 msg.append(surgeChoices[-1]) 
             else:
                 rospy.logwarn('UNFEASIBLE OPTIMIZATION - idle state')
-                for i in range((h.config.H+1)*2):
+                for i in range((H+1)*2):
                     msg.append(0.0)
             #HEURISTIC FUNCTION to complete the POLICY OF INTENT
 
