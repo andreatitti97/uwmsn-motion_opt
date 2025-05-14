@@ -175,13 +175,7 @@ def main():
                         tmp = plcyInt[j]
                     measure_, rel_bearing_, meas_pos = sensor.measureBearing(xi_i[0], xi_i[1], 
                                                                         [tmp[0], tmp[1]], tmp[2])
-                    meas_table.append([measure_, meas_pos[0], meas_pos[1]])
-                
-                '''if auvID == 1:
-                    meas_table.pop(2)
-                if auvID == 3:
-                    meas_table.pop(0)'''
-                
+                    meas_table.append([measure_, meas_pos[0], meas_pos[1]])              
 
                 # Compute the regressor
                 estimator.computeState(meas_table)
@@ -191,8 +185,6 @@ def main():
                 meas_table = []
 
             # Initialize the problem
-            #rospy.loginfo('%s OPTIMIZATION ID %s STARTING! --> Policy of intent: %s %s',cyan,auvID,plcyInt,none)
-
             for i in range(auvNum):
                 if i != auvID:
                     delta_t = t - plcyInt[i][-1]  # Time elapsed since policy creation
@@ -222,12 +214,6 @@ def main():
             avg_nodes.append(nodes), avg_time.append(wall_time)
 
             headingChoices, surgeChoices = bns[5],bns[6]
-
-            '''if auvID == 2:
-                pareto_data_c.append(list_c[0])
-                pareto_data_g.append(list_g[0])            
-                np.savetxt(log_path+'/list_c',pareto_data_c)
-                np.savetxt(log_path+'/list_g',pareto_data_g)'''
 
             # Apply the Forbidden Decision Method
             headingChoices = h.frbdDcsMtd(headingChoices)

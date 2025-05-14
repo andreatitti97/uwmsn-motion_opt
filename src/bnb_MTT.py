@@ -63,7 +63,7 @@ class Simple(pybnb.Problem):
         self._gamma_w = header.config.gamma_w
         self._alpha_w = header.config.alpha_w
         self._k_phi = k_phi#is inside a list, TODO consider multi target case
-        self.k_phi_goal = 5#20/len(self._netTopology)# TODO validate costant
+        self.k_phi_goal = 10#5#20/len(self._netTopology)# TODO validate costant
 
         #TODO Temporary lists for plotting pareto solution
         self.cost_c, self.cost_g, self.cost_d = [], [], []
@@ -103,66 +103,41 @@ class Simple(pybnb.Problem):
         for i in range(len(self._theta)):
             for j in range(len(self._u)):#TODO : OPTIMIZE ALSO SURGE
             
-                tmp_xi, tmp_phi, tmp_s, tmp_pi_bar = self.simulation(self._theta[i],self._u[j],
+                targetsEstState, regressors, tmp_s, tmp_pi_bar = self.simulation(self._theta[i],self._u[j],
                                                             x_hat, self.P, s, pi_bar)
 
                 father_value = cost
+                tmp_cost = 0.0
+                # Compute the cost functions
+                for k in range(self._targetNum):
+                    tmp_phi = regressors[k].phi
+                    tmp_xi = targetsEstState[k].x
 
-                cost_d = self._desRange/((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2)))                             
-                cost_g = 1/header.utils.compute_cost(tmp_phi,cost_d,self._auvID) # in [0,1]
+                    cost_d = self._desRange/((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2)))                             
+                    cost_g = 1/header.utils.compute_cost(tmp_phi,cost_d,self._auvID) # in [0,1]
 
-                cost_c, pen_dm, pen_abs = header.applyConstraints(tmp_pi_bar, tmp_xi, tmp_s, self._DT, 
-                                                            self._d0, self._desRange,self._auvID, 
-                                                            self._acousticParams, self._auvFailure)
+                    cost_c, pen_dm, pen_abs = header.applyConstraints(tmp_pi_bar, tmp_xi, tmp_s, self._DT, 
+                                                                self._d0, self._desRange,self._auvID, 
+                                                                self._acousticParams, self._auvFailure)
 
-                if  pen_dm == 1.0 or pen_abs == 1.0:
-                    continue     
-                else:
-                    
-                    if self._k_phi[0] <= self.k_phi_goal:
-                        self._alpha_w = 0.4
-
-                    child_value = father_value + (1-self._alpha_w)*cost_d + self._alpha_w*cost_g + self._gamma_w*cost_c
-                    
-                if self._auvID == 3000:
-                    'ADD DEBUG PRINTS HERE'
-
-                # Compute the bound according to the proposed algorithm
-                # Update data result
-
-               
-                # **Compute an upper bound estimate**
-                # Since the cost is additive, we estimate the best possible completion cost.
-                # Assuming future costs are at least cost_d (best-case scenario).
-                remaining_steps = header.config.H - len(self._hedingChoices)
+                    if  pen_dm == 1.0 or pen_abs == 1.0:
+                        continue     
+                    else:
+                        
+                        if self._k_phi[0] <= self.k_phi_goal:
+                            self._alpha_w = 0.4
+                            tmp_cost += (1-self._alpha_w)*cost_d + self._alpha_w*cost_g + self._gamma_w*cost_c
+                        
+                        tmp_cost += (1-self._alpha_w)*cost_d + self._alpha_w*cost_g + self._gamma_w*cost_c
                 
-
-                # Estimate the minimal possible cost per step
-                min_cost_d = 1  # Best-case distance cost
-                min_cost_g = 1  # Best possible gain cost (assuming perfect efficiency)
-                min_cost_c = 0  # No constraint violations
-
-                # Best possible future cost estimate
-                future_best_case = remaining_steps * (min_cost_d + min_cost_g + self._gamma_w * min_cost_c)
-
-                # Compute the upper bound
-                upper_bound = child_value + future_best_case
-
-                # Prune if upper bound is worse than the best solution found so far
-                '''if upper_bound <= self._bound:
-                    continue  # Skip this branch'''
-
-                # Update bound if this is a better solution
-                #self._bound = max(self._bound, child_value)
+                child_value = father_value + tmp_cost
 
                 # Generate new heading and surge choices
                 headingChoices = self._hedingChoices + [self._theta[i]]
                 surgeChoices = self._surgeChoices + [self._u[j]]
 
-        
-
                 if len(headingChoices) == header.config.H:
-                    child_value = child_value + 1
+                    child_value = child_value + (1/(((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2)))-self._desRange))**2#put terminal cost here to end also the search
 
                     if self._bound == +float("inf"):# UNIFORM COST SEARCH SETUP
                         self._bound = child_value
@@ -231,8 +206,10 @@ class Simple(pybnb.Problem):
     def simulation(self, delta_theta, delta_u, x_hat, P, s_pose, pi_bar):
         # Initialize data structures and classes
         meas_table = []
-        target = header.target_module.Target(x_hat, self._DT, P)
-        estimator = header.estimator_module.Estimation()
+        targets, estimators = [], []
+        for i in range(self._targetNum):
+            targets.append(header.target_module.Target(x_hat, self._DT, P))
+            estimators.append(header.estimator_module.Estimation())
 
         # Initialize AUVs state structures
         auvs_xy = [[0.0 for _ in range(len(s_pose) + 1 + header.config.H)]
@@ -242,34 +219,64 @@ class Simple(pybnb.Problem):
         pi_bar_out, auvs_xy, s_pose = self.beliefPropagation(pi_bar, auvs_xy, s_pose, delta_theta,
                                                             delta_u)
 
-        # Simulate measurements for cost function computation
-        for i, sensor in enumerate(self._sensors):
-            tmp = s_pose if self._auvID == i + 1 else (auvs_xy[i] if 
-                                                       np.any(auvs_xy[i][:3]) else self._S0[i])
-            
-            measure_, rel_bearing_, meas_pos = sensor.measureBearing(target.x[0], target.x[1], 
-                                                                    [tmp[0], tmp[1]], tmp[2])
-            meas_table.append([measure_, meas_pos[0], meas_pos[1]])
+        for j in range(len(targets)):
+            target = targets[j]
+            # Simulate measurements for cost function computation
+            for i, sensor in enumerate(self._sensors):
+                
+                tmp = s_pose if self._auvID == i + 1 else (auvs_xy[i] if 
+                                                        np.any(auvs_xy[i][:3]) else self._S0[i])
+                
+                measure_, rel_bearing_, meas_pos = sensor.measureBearing(target.x[0], target.x[1], 
+                                                                        [tmp[0], tmp[1]], tmp[2])
+                meas_table.append([measure_, meas_pos[0], meas_pos[1]])
 
-        # Filter out specific measurements based on network topology and/or failure status
-        if self._auvFailure == False:
-            for i in range(self._auvNum):
-                if i+1 not in self._netTopology and i+1 != self._auvID:
-                    meas_table.pop(i)
-        else:
-            meas_table.pop(1)
+            # Filter out specific measurements based on network topology and/or failure status
+            if self._auvFailure == False:
+                for i in range(self._auvNum):
+                    if i+1 not in self._netTopology and i+1 != self._auvID:
+                        meas_table.pop(i)
+            else:
+                meas_table.pop(2)
 
-        # Compute the regressor
-        estimator.computeState(meas_table)
+            # Compute the regressor
+            estimators[j].computeState(meas_table)
 
-        return target.x, estimator.phi, s_pose, pi_bar_out
+        return targets, estimators, s_pose, pi_bar_out
 
     
 
 
 
 
+''' # Compute the bound according to the proposed algorithm
+                # Update data result
 
+               
+                # **Compute an upper bound estimate**
+                # Since the cost is additive, we estimate the best possible completion cost.
+                # Assuming future costs are at least cost_d (best-case scenario).
+                remaining_steps = header.config.H - len(self._hedingChoices)
+                
+
+                # Estimate the minimal possible cost per step
+                min_cost_d = 1  # Best-case distance cost
+                min_cost_g = 1  # Best possible gain cost (assuming perfect efficiency)
+                min_cost_c = 0  # No constraint violations
+
+                # Best possible future cost estimate
+                future_best_case = remaining_steps * (min_cost_d + min_cost_g + self._gamma_w * min_cost_c)
+
+                # Compute the upper bound
+                upper_bound = child_value + future_best_case
+
+                # Prune if upper bound is worse than the best solution found so far
+                if upper_bound <= self._bound:
+                    continue  # Skip this branch
+
+                # Update bound if this is a better solution
+                #self._bound = max(self._bound, child_value)
+'''
 
 '''ord_d = math.floor(math.log(cost_d, 10))
 if cost_c != 0.0:
