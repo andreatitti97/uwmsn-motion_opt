@@ -11,7 +11,6 @@ from uwmsn_msgs.msg import Matrix
 # Module std:out
 from contextlib import redirect_stdout
 import io
-
 import time
 
 # Load the h file as a Python module 
@@ -181,7 +180,7 @@ def main():
                 estimator.computeState(meas_table)
                 # Filter out specific measurements based on network topology and/or failure status
 
-                k_phi = h.utils.compute_cost(estimator.phi,1,auvID)
+                k_phi = h.utils.compute_cost(estimator.phi,1,auvID)#TODO CHECK THIS COMPUTATION
                 meas_table = []
 
             # Initialize the problem

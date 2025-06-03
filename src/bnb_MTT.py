@@ -124,10 +124,9 @@ class Simple(pybnb.Problem):
                         continue     
                     else:
                         
-                        if self._k_phi[0] <= self.k_phi_goal:
-                            self._alpha_w = 0.4
-                            tmp_cost += (1-self._alpha_w)*cost_d + self._alpha_w*cost_g + self._gamma_w*cost_c
-                        
+                        '''if self._k_phi[0] <= self.k_phi_goal:
+                            self._alpha_w = 0.4'''
+         
                         tmp_cost += (1-self._alpha_w)*cost_d + self._alpha_w*cost_g + self._gamma_w*cost_c
                 
                 child_value = father_value + tmp_cost
