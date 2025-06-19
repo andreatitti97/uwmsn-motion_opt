@@ -136,7 +136,7 @@ class Simple(pybnb.Problem):
                 surgeChoices = self._surgeChoices + [self._u[j]]
 
                 if len(headingChoices) == header.config.H:
-                    child_value = child_value + (1/(((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2)))-self._desRange))**2#put terminal cost here to end also the search
+                    child_value = child_value + (1/(((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2)))-self._desRange))**3#put terminal cost here to end also the search
 
                     if self._bound == +float("inf"):# UNIFORM COST SEARCH SETUP
                         self._bound = child_value

@@ -51,7 +51,8 @@ def applyConstraints(tmp_pi_bar, xi_hat, tmp_s, DT, init_d, desRange, auvID, aco
 
     # Penalty for exceeding target distance constraints
     if tmp_d_target > (2 * init_d) or tmp_d_target <= desRange / 2:
-        print('auvID Penalty Distance', auvID)
+        #print('auvID Penalty Distance', auvID)
+        print('tmp_d_target', tmp_d_target, 'init_d', init_d, 'desRange', desRange)
         pen_abs = 1.0
 
     # Compute expected SNR between the local AUV and its neighbors

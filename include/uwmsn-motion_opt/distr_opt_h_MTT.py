@@ -18,6 +18,10 @@ spec = importlib.util.spec_from_file_location("module.bnb_MTT", local_directory+
 bnb = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(bnb)
 
+spec = importlib.util.spec_from_file_location("module.planner", local_directory+'/PSO_planner.py')
+planner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(planner)
+
 spec = importlib.util.spec_from_file_location("module.estimator", local_directory+'/Classes/estimator.py')
 estimator_module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(estimator_module)
@@ -29,6 +33,8 @@ spec.loader.exec_module(utils)
 spec = importlib.util.spec_from_file_location("module.sensor", pkg_directory+"/sensor.py")
 sensor = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sensor)
+
+
 
 def frbdDcsMtd(output_policy):
     # Forbidden Decision Method

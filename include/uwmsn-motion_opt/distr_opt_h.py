@@ -20,3 +20,8 @@ spec.loader.exec_module(bnb)
 spec = importlib.util.spec_from_file_location("module.utils", local_directory+'/Classes/utils_opt.py')
 utils = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(utils)
+
+
+spec = importlib.util.spec_from_file_location("module.utils", local_directory+'/Classes/PSO_planner.py')
+planner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(planner)
