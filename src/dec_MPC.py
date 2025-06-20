@@ -12,6 +12,7 @@ from uwmsn_msgs.msg import Matrix
 from contextlib import redirect_stdout
 import io
 import time
+from pybnb.solver import Solver
 
 # Load the h file as a Python module 
 pkg_directory = os.path.dirname(os.path.dirname(pathlib.Path(__file__).parent.resolve()))
@@ -74,7 +75,7 @@ def listener(auvID: int,auvNum: int) -> None:
     rospy.Subscriber('/'+str(auvID)+'/estimation', Matrix, callbackTstate)
     rospy.Subscriber('vehicle_state_'+str(auvID), numpy_msg(Floats), callbackSstate)
 
-    for i in range(auvNum):
+    '''for i in range(auvNum):
         #if i + 1 != auvID:
             # Define a wrapper function to capture the index
         def create_callback(index):
@@ -82,7 +83,86 @@ def listener(auvID: int,auvNum: int) -> None:
                 global plcyInt
                 plcyInt[index] = list(data.data)
             return callback
-        rospy.Subscriber('/'+str(i+1)+'/rx_ctrl_policy', numpy_msg(Floats), create_callback(i))
+        rospy.Subscriber('/'+str(i+1)+'/rx_ctrl_policy', numpy_msg(Floats), create_callback(i))'''
+
+
+
+def compute_neighbor_policy(h,auv_id_neighbor, init_state_neighbor, x_hat_shared, pi_bar_placeholder,
+                            ctrl_cmds, init_d, acousticParams, k_phi, auvNum, targetNum, netTopology):
+    """
+    Compute a plausible policy of intent for a neighbor AUV using local optimization.
+
+    Parameters
+    ----------
+    auv_id_neighbor : int
+        The ID of the neighbor AUV (1-based).
+    init_state_neighbor : list
+        Initial state of the neighbor [x, y, theta].
+    x_hat_shared : list
+        Shared estimate of the target state.
+    pi_bar_placeholder : list of lists
+        Placeholder pi_bar to initialize, e.g., all zeros.
+    ctrl_cmds : list
+        Heading command discretization.
+    init_d : float
+        Initial guess for distance to target.
+    acousticParams : dict
+        Acoustic constraints.
+    k_phi : list
+        Target-specific observability metric.
+    auvNum : int
+        Number of AUVs in the team.
+    targetNum : int
+        Number of targets (usually 1).
+    netTopology : list
+        Topology as per config.
+
+    Returns
+    -------
+    policy_pi_bar_neighbor : list
+        The locally computed policy of intent (pi_bar) for this neighbor.
+    """
+
+    # Instantiate the local MPC for the neighbor
+    neighbor_mpc = h.bnb.Simple(
+        auvNum=auvNum,
+        auvID=auv_id_neighbor,
+        targetNum=targetNum,
+        x_hat=x_hat_shared,
+        s=init_state_neighbor,
+        ctrl_cmds=ctrl_cmds,
+        pi_bar=pi_bar_placeholder,
+        initState=[init_state_neighbor for _ in range(auvNum)],
+        init_d=init_d,
+        acousticParams=acousticParams,
+        k_phi=k_phi,
+        AUV_failure=False,
+        localAUV=False,  # Local optimization for neighbor
+    )
+
+    # Run pybnb solver (limit time or tree depth)
+    solver = Solver()
+    solver.max_depth = h.config.H  # Limit search horizon
+    with io.StringIO() as buf, redirect_stdout(buf):
+        solver.solve(neighbor_mpc)
+
+    # After solving, extract final control sequence
+    heading_seq = neighbor_mpc._hedingChoices
+    surge_seq = neighbor_mpc._surgeChoices
+
+    # Build pi_bar format
+    # Start from initial state
+    x, y, theta = init_state_neighbor
+    policy_pi_bar = [x, y, theta]
+
+    for h, s in zip(heading_seq, surge_seq):
+        policy_pi_bar.append(h)  # delta_theta
+    for h, s in zip(heading_seq, surge_seq):
+        policy_pi_bar.append(s)  # delta_surge
+
+    return policy_pi_bar
+
+
 
 def main():
     
@@ -165,7 +245,7 @@ def main():
                 xi_i = xi_hat[i]
                 if initialized[i] == False:
                     init_d[i] = np.sqrt((xi_i[1]-senState[1])**2+(xi_i[0]-senState[0])**2)
-
+                
                 # Simulate measurements for cost function computation
                 for j, sensor in enumerate(sensors):
                     if j == auvID + 1:
@@ -183,26 +263,40 @@ def main():
                 k_phi = h.utils.compute_cost(estimator.phi,1,auvID)#TODO CHECK THIS COMPUTATION
                 meas_table = []
 
-            # Initialize the problem
+            # Dec.MPC (locally compute the policy of intent by means of optimization)
+
+            start = time.time()
             for i in range(auvNum):
-                if i != auvID:
-                    delta_t = t - plcyInt[i][-1]  # Time elapsed since policy creation
-                    
-                    # Compute how many control steps have already been executed
-                    steps_applied = min(int(delta_t // DT), H - 1)  # Ensure we stay within bounds
-                    
-                    # Compute updated position using the appropriate heading and surge command
-                    plcyInt[i][0] += np.cos(plcyInt[i][2] + plcyInt[i][3 + steps_applied]) * plcyInt[i][3 + H + steps_applied] * delta_t
-                    plcyInt[i][1] += np.sin(plcyInt[i][2] + plcyInt[i][3 + steps_applied]) * plcyInt[i][3 + H + steps_applied] * delta_t
+                if i + 1 != auvID:
+
+                    j_pi_bar = plcyInt[i]
+                    d0 = (np.sqrt((xi_i[1]-j_pi_bar[1])**2+(xi_i[0]-j_pi_bar[0])**2))
+
+                    plcyInt[i] = compute_neighbor_policy(
+                        h,
+                        auv_id_neighbor=2,
+                        init_state_neighbor=j_pi_bar[0:3],  # e.g., [x, y, theta]
+                        x_hat_shared=xi_hat[0],
+                        pi_bar_placeholder=[[0.0]*h.config.H*2 + [0.0]]*auvNum,
+                        ctrl_cmds=ctrl_set,
+                        init_d=d0,
+                        acousticParams=acousticParams,
+                        k_phi=k_phi,
+                        auvNum=auvNum,
+                        targetNum=targetNum,
+                        netTopology=netTopology
+                    )
+
+
 
 
             problem = h.bnb.Simple(auvNum, auvID, acquiredTargets, xi_hat[0], senState, ctrl_set,
-                                        plcyInt, init_state, init_d[0], acousticParams, [k_phi], AUV_failure)                                        
+                                        plcyInt, init_state, init_d[0], acousticParams, [k_phi], AUV_failure, True)                                        
             # Solve the optimization problem
             solver = h.bnb.pybnb.Solver()
             # Store the results
 
-            start = time.time()
+            
             with io.StringIO() as buf, redirect_stdout(buf):
                 res = solver.solve(problem,queue_strategy="breadth",
                                     node_limit=limit,relative_gap=0.001)
@@ -210,7 +304,7 @@ def main():
             rospy.loginfo('%s Optimization AUV%s done, elapsed time (s): %s. %s',cyan,auvID,stop-start,none)
             bns, wall_time, nodes = res.best_node.state, res.wall_time, res.nodes
 
-            avg_nodes.append(nodes), avg_time.append(start-stop)
+            avg_nodes.append(nodes), avg_time.append(stop-start)
 
             headingChoices, surgeChoices = bns[5],bns[6]
 

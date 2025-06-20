@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<launch>
+
+<arg name="auvID"/>
+<arg name="auvNum"/>
+<arg name="targetNum"/>
+    
+  <node pkg="uwmsn-motion_opt" type="dec_MPC.py" name="optimization" output="screen" args="$(arg auvID)">   <!-- output="screen" -->
+    <!-- <rosparam command="load" file="$(find mission_manager)/config/conf_auv_$(arg auvID).yaml" />-->
+    <param name="auvID" type="int" value="$(eval arg('auvID'))" />
+    <param name="auvNum" type="int" value="$(eval arg('auvNum'))" />
+    <param name="targetNum" type="int" value="$(eval arg('targetNum'))" />
+    
+  </node>
+    
+    
+</launch>

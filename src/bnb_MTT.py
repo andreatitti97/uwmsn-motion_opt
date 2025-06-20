@@ -28,7 +28,7 @@ import numpy as np
 
 class Simple(pybnb.Problem):
     def __init__(self, auvNum, auvID, targetNum, x_hat, s, ctrl_cmds,
-                    pi_bar, initState, init_d, acousticParams, k_phi, AUV_failure=False):
+                    pi_bar, initState, init_d, acousticParams, k_phi, AUV_failure=False, localAUV=True):
                
         # Basic parameters initialization
         self._auvNum = auvNum
@@ -70,6 +70,8 @@ class Simple(pybnb.Problem):
 
         # Acoustic environment and modem parameters
         self._acousticParams = acousticParams
+
+        self.localAUV = localAUV
 
     # Required methods for graph generation and searching
     def sense(self):
@@ -116,9 +118,13 @@ class Simple(pybnb.Problem):
                     cost_d = self._desRange/((np.sqrt((tmp_xi[0]-tmp_s[0])**2+(tmp_xi[1]-tmp_s[1])**2)))                             
                     cost_g = 1/header.utils.compute_cost(tmp_phi,cost_d,self._auvID) # in [0,1]
 
+                    #if self.localAUV == True:
                     cost_c, pen_dm, pen_abs = header.applyConstraints(tmp_pi_bar, tmp_xi, tmp_s, self._DT, 
-                                                                self._d0, self._desRange,self._auvID, 
-                                                                self._acousticParams, self._auvFailure)
+                                                                    self._d0, self._desRange,self._auvID, 
+                                                                    self._acousticParams, self._auvFailure)
+                    '''else:
+                        cost_c = 0.0
+                        pen_dm, pen_abs = 0.0, 0.0'''
 
                     if  pen_dm == 1.0 or pen_abs == 1.0:
                         continue     

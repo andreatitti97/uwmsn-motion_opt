@@ -206,7 +206,7 @@ def main():
             (best_heading_seq, best_surge_seq), best_cost = planner.optimize()
             stop = time.time()
             rospy.loginfo('%s Optimization AUV%s done, elapsed time (s): %s. %s',cyan,auvID,stop-start,none)
-
+            avg_time.append(stop-start)
             # Apply the Forbidden Decision Method
             best_heading_seq = h.frbdDcsMtd(best_heading_seq)
         

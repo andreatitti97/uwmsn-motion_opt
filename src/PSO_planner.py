@@ -48,7 +48,7 @@ class PSOPlanner:
         self.max_iter = max_iter
         self.n_particles = n_particles
 
-        self.heading_range = [-ctrl_range[0], ctrl_range[0]]  # heading delta
+        self.heading_range = [-h.config.u_max,h.config.u_max]  # heading delta
         self.surge_range = [0.0, ctrl_range[1]]               # surge velocity
 
         # always one target 
@@ -56,10 +56,16 @@ class PSOPlanner:
 
     def initialize_particles(self):
         particles = []
+        
+        # Create discrete sets of admissible values
+        heading_choices = np.linspace(-h.config.u_max, h.config.u_max, num=7)  # example: [-u, ..., 0, ..., +u]
+        surge_choices = np.linspace(0.0, self.ctrl_range[1], num=5)            # example: [0, ..., u_max]
+
         for _ in range(self.n_particles):
-            heading_seq = np.random.uniform(self.heading_range[0], self.heading_range[1], self.H)
-            surge_seq = np.random.uniform(self.surge_range[0], self.surge_range[1], self.H)
+            heading_seq = np.random.choice(heading_choices, self.H)
+            surge_seq = np.random.choice(surge_choices, self.H)
             particles.append((heading_seq, surge_seq))
+    
         return particles
 
     def evaluate_particle(self, heading_seq, surge_seq):
@@ -94,20 +100,18 @@ class PSOPlanner:
                     return np.inf  # discard infeasible particles
 
                 cost = (1 - h.config.alpha_w) * cost_d + \
-                       h.config.alpha_w * cost_g + \
-                       h.config.gamma_w * cost_c
-                total_cost += cost
+                       h.config.alpha_w * cost_g 
+                total_cost += 1/cost
 
         return total_cost
 
     def optimize(self):
-        # PSO parameters
-        w = 0.5  # inertia
-        c1 = 1.5  # cognitive
-        c2 = 1.5  # social
+        # Discrete control options
+        heading_choices = np.linspace(-h.config.u_max, h.config.u_max, num=7)
+        surge_choices = np.linspace(0.0, self.ctrl_range[1], num=5)
 
+        # Initialize particles
         particles = self.initialize_particles()
-        velocities = [(np.zeros(self.H), np.zeros(self.H)) for _ in range(self.n_particles)]
         personal_best = particles[:]
         personal_best_costs = [self.evaluate_particle(x, y) for x, y in particles]
         global_best_idx = np.argmin(personal_best_costs)
@@ -115,23 +119,19 @@ class PSOPlanner:
 
         for iter_ in range(self.max_iter):
             for i in range(self.n_particles):
-                h_seq, s_seq = particles[i]
-                v_h, v_s = velocities[i]
+                # Mutation: randomly tweak the current particle by changing a few values
+                h_seq = particles[i][0].copy()
+                s_seq = particles[i][1].copy()
+                for k in range(self.H):
+                    if np.random.rand() < 0.3:  # mutation probability
+                        h_seq[k] = np.random.choice(heading_choices)
+                    if np.random.rand() < 0.3:
+                        s_seq[k] = np.random.choice(surge_choices)
 
-                # Update velocity
-                r1, r2 = np.random.rand(), np.random.rand()
-                v_h = w * v_h + c1 * r1 * (personal_best[i][0] - h_seq) + c2 * r2 * (global_best[0] - h_seq)
-                v_s = w * v_s + c1 * r1 * (personal_best[i][1] - s_seq) + c2 * r2 * (global_best[1] - s_seq)
-
-                # Update position
-                h_seq = np.clip(h_seq + v_h, self.heading_range[0], self.heading_range[1])
-                s_seq = np.clip(s_seq + v_s, self.surge_range[0], self.surge_range[1])
-
-                particles[i] = (h_seq, s_seq)
-                velocities[i] = (v_h, v_s)
-
-                # Evaluate new particle
+                # Evaluate mutated particle
                 cost = self.evaluate_particle(h_seq, s_seq)
+
+                # Update personal best
                 if cost < personal_best_costs[i]:
                     personal_best[i] = (h_seq, s_seq)
                     personal_best_costs[i] = cost
@@ -140,7 +140,20 @@ class PSOPlanner:
             global_best_idx = np.argmin(personal_best_costs)
             global_best = personal_best[global_best_idx]
 
+            # Rebuild particle swarm for next iteration centered around best
+            for i in range(self.n_particles):
+                h_seq = np.array([
+                    np.random.choice([personal_best[i][0][k], global_best[0][k]]) if np.random.rand() < 0.5 else personal_best[i][0][k]
+                    for k in range(self.H)
+                ])
+                s_seq = np.array([
+                    np.random.choice([personal_best[i][1][k], global_best[1][k]]) if np.random.rand() < 0.5 else personal_best[i][1][k]
+                    for k in range(self.H)
+                ])
+                particles[i] = (h_seq, s_seq)
+
         return global_best, personal_best_costs[global_best_idx]
+
 
     def beliefPropagation(self, pi_bar, N_i, s_i, r_i, u_i):
         pi_bar_out = []
@@ -214,7 +227,7 @@ class PSOPlanner:
             for i, sensor in enumerate(self._sensors):
                 
                 tmp = s_pose if self.auvID == i + 1 else (auvs_xy[i] if 
-                                                        np.any(auvs_xy[i][:3]) else self._S0[i])
+                                                        np.any(auvs_xy[i][:3]) else self.senState[i])
                 
                 measure_, rel_bearing_, meas_pos = sensor.measureBearing(target.x[0], target.x[1], 
                                                                         [tmp[0], tmp[1]], tmp[2])
@@ -246,10 +259,10 @@ class PSOPlanner:
         tmp_d_target = np.linalg.norm([xi_hat[1] - tmp_s[1], xi_hat[0] - tmp_s[0]])
 
         # Penalty for exceeding target distance constraints
-        if tmp_d_target > (2 * init_d) or tmp_d_target <= desRange / 2:
+        '''if tmp_d_target > (2 * init_d) or tmp_d_target <= desRange / 2:
             print('auvID Penalty Distance', auvID)
             print('tmp_d_target', tmp_d_target, 'init_d', init_d, 'desRange', desRange)
-            pen_abs = 1.0
+            pen_abs = 1.0'''
 
         # Compute expected SNR between the local AUV and its neighbors
         for i in range(loops):
