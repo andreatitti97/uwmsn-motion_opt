@@ -210,7 +210,7 @@ def main():
             rospy.loginfo('%s Optimization AUV%s done, elapsed time (s): %s. %s',cyan,auvID,stop-start,none)
             bns, wall_time, nodes = res.best_node.state, res.wall_time, res.nodes
 
-            avg_nodes.append(nodes), avg_time.append(start-stop)
+            avg_nodes.append(nodes), avg_time.append(stop-start)
 
             headingChoices, surgeChoices = bns[5],bns[6]
 
