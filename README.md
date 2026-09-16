@@ -71,7 +71,7 @@ This package is meant to be evaluated together with the simulator and communicat
 
 If you use this package in research or teaching, please cite the project paper describing the motion optimization strategy under intermittent communication.
 
-> Tiranti, A., et al. "Motion optimization strategy for passive acoustic monitoring with a team of AUVs considering intermittent communication." Please cite the published paper appropriately in any derived work.
+> A. Tiranti, P. Di Lillo, F. Wanderlingh, E. Simetti, M. Baglietto, and G. Antonelli, "Motion Optimization Strategy for Passive Acoustic Monitoring With a Team of AUVs Considering Intermittent Communication," IEEE Journal of Oceanic Engineering, vol. 50, no. 4, 2025. doi: 10.1109/JOE.2025.3586242.
 
 ## Notes
 
