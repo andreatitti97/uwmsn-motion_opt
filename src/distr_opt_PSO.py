@@ -153,9 +153,8 @@ def main():
             xi_hat = [state[2:6] for state in targetsState.values()]
             k_phi = [state[0] for state in targetsState.values()]
             cov_list = [state[6:] for state in targetsState.values()]
-            # TODO REMEMBER THE LABEL!!
-            
-            # Compute the current cost function:    
+
+            # Compute the current cost function:
             estimator = h.estimator_module.Estimation()
             sensors, meas_table = [], []
             for i in range(auvNum):
@@ -180,7 +179,7 @@ def main():
                 estimator.computeState(meas_table)
                 # Filter out specific measurements based on network topology and/or failure status
 
-                k_phi = h.utils.compute_cost(estimator.phi,1,auvID)#TODO CHECK THIS COMPUTATION
+                k_phi = h.utils.compute_cost(estimator.phi,1,auvID)
                 meas_table = []
 
             # Initialize the problem

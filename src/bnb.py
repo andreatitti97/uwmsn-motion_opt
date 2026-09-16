@@ -63,7 +63,6 @@ def connectivityCost(tmp_pi_bar, tmp_s, DT, init_d,
                 else:
                     snr.append(0)
 
-            # TODO: Generalize the formula -- Collision Avoidance Constraint
             if (auvID == 1 and i == 1) or (auvID == 2 and i != 1) or (auvID == 3 and i == 1):
                 if tmp <= d_min:
                     pen_dm = 1.0
@@ -381,8 +380,7 @@ class Simple(pybnb.Problem):
             arr = [measure_,meas_pos[0],meas_pos[1]]
             meas_table.append(arr)
 
-        # YOU SHOULD CONSIDER ONLY YOUR NEIGHBOURs IN OPTIMIZING THE GEOMTRY
-        # TODO: Generalize the formula (brute version for 3 auv)
+        # Only the relevant neighbors are considered in the geometry optimization.
         if AUV_failure == False:
             if self.auvID == 1:
                 meas_table.pop(2)

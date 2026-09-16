@@ -1,3 +1,10 @@
+"""Distributed optimization node for the UWMSN mission.
+
+This ROS node estimates target states from incoming measurements, integrates
+neighbor policies, and computes the control policy associated with the current
+AUV under communication-constrained conditions.
+"""
+
 #Import basic system modules
 import os, pathlib, importlib.util
 # Import math modules

@@ -1,3 +1,9 @@
+"""Particle-swarm optimization planner for the UWMSN control problem.
+
+The planner explores candidate heading and surge sequences and evaluates them
+using the project-specific cost and constraint model.
+"""
+
 import numpy as np
 import random
 import os, pathlib, importlib.util
@@ -23,6 +29,8 @@ def alphaFunc(f):
     return 0.11*(f**2/(1+f**2))+44*(f**2/(4100+f**2))+(2.75*(1e-4)*(f**2))+0.003
 
 class PSOPlanner:
+    """Search for a feasible control policy using a particle swarm optimizer."""
+
     def __init__(self, auvID, auvNum, H, ctrl_range, senState, target_state, 
                  plcyInt, netTopology, DT, init_d, max_iter=50, n_particles=30):
         self.auvID = auvID

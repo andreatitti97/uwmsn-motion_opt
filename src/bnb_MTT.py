@@ -62,10 +62,9 @@ class Simple(pybnb.Problem):
         self._netTopology = netTopology[auvID-1]
         self._gamma_w = header.config.gamma_w
         self._alpha_w = header.config.alpha_w
-        self._k_phi = k_phi#is inside a list, TODO consider multi target case
-        self.k_phi_goal = 10#5#20/len(self._netTopology)# TODO validate costant
+        self._k_phi = k_phi
+        self.k_phi_goal = 10
 
-        #TODO Temporary lists for plotting pareto solution
         self.cost_c, self.cost_g, self.cost_d = [], [], []
 
         # Acoustic environment and modem parameters
@@ -103,8 +102,8 @@ class Simple(pybnb.Problem):
         found_child = False  # Track if any valid children are generated
 
         for i in range(len(self._theta)):
-            for j in range(len(self._u)):#TODO : OPTIMIZE ALSO SURGE
-            
+            for j in range(len(self._u)):
+
                 targetsEstState, regressors, tmp_s, tmp_pi_bar = self.simulation(self._theta[i],self._u[j],
                                                             x_hat, self.P, s, pi_bar)
 
