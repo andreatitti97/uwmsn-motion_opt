@@ -4,7 +4,7 @@ This package contains the motion-planning and optimization layer for the UWMSN p
 
 ## Purpose
 
-`uwmsn-motion_opt` implements the planning logic for the underwater monitoring scenario. It consumes target estimates and neighboring state information, then computes feasible policies for the current AUV while accounting for communication-disrupted information exchange.
+`uwmsn-motion_opt` implements the planning logic for the underwater monitoring scenario. It consumes target estimates and neighboring state information, then computes feasible control policies for the current AUV while accounting for communication-disrupted information exchange.
 
 ## Included algorithms and entry points
 
@@ -24,16 +24,57 @@ The project includes several optimization and control variants, including:
 
 This package receives state estimates and policy updates, solves the current optimization problem, and publishes the resulting control policy back into the ROS network for execution and simulation.
 
+## Requirements
+
+- ROS 1 catkin environment
+- `rospy`
+- `std_msgs`
+- `numpy`
+- `scipy` (when plotting or auxiliary numerical routines are used)
+- `matplotlib` for visualization utilities
+- `uwmsn_msgs` or the equivalent message layer used in the project
+
+## Installation
+
+Place this package inside the `src` folder of your catkin workspace and rebuild:
+
+```bash
+cd ~/ros1_ws
+catkin_make
+source devel/setup.bash
+```
+
+## Usage
+
+Start the optimization node for a specific AUV:
+
+```bash
+roslaunch uwmsn-motion_opt distr_opt.launch auvID:=1 auvNum:=4
+```
+
+If you are using the multi-target configuration, prefer the multi-target launch files and align the AUV count and parameters with the simulator setup.
+
+## Reproducibility
+
+To reproduce a result, keep the following fixed for a given run:
+
+- AUV count
+- target count
+- communication topology
+- packet-loss parameters
+- optimization algorithm variant
+- launch arguments
+
+This package is meant to be evaluated together with the simulator and communication layer as one research pipeline.
+
 ## Citation
 
 If you use this package in research or teaching, please cite the project paper describing the motion optimization strategy under intermittent communication.
 
 > Tiranti, A., et al. "Motion optimization strategy for passive acoustic monitoring with a team of AUVs considering intermittent communication." Please cite the published paper appropriately in any derived work.
 
-A placeholder for the second paper can be added here once its final bibliographic information is ready.
-
 ## Notes
 
 - The package targets ROS 1 and expects a catkin workspace.
 - It is designed to be used together with `uwmsn-sim` and `uw-communication`.
-- The code remains research-oriented and is intended to be cleaned further before the first public GitHub release.
+- The code is research-oriented and can be used directly for controlled academic experimentation.

@@ -9,8 +9,7 @@
 
   <license>MIT</license>
 
-  <!-- Reserve this for the public repository URL once it is available. -->
-  <!-- <url type="repository">https://github.com/your-org/uwmsn-project</url> -->
+  <url type="repository">https://github.com/your-username/uwmsn-project</url>
 
   <buildtool_depend>catkin</buildtool_depend>
 
