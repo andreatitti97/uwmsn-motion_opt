@@ -73,6 +73,10 @@ If you use this package in research or teaching, please cite the project paper d
 
 > A. Tiranti, P. Di Lillo, F. Wanderlingh, E. Simetti, M. Baglietto, and G. Antonelli, "Motion Optimization Strategy for Passive Acoustic Monitoring With a Team of AUVs Considering Intermittent Communication," IEEE Journal of Oceanic Engineering, vol. 50, no. 4, 2025. doi: 10.1109/JOE.2025.3586242.
 
+> Andrea Tiranti, Francesco Wanderlingh, Enrico Simetti, Marco Baglietto, Giovanni Indiveri, and Antonio Pascoal, "A distributed motion planning approach to cooperative underwater acoustic source tracking," Ocean Engineering, vol. 344, 2026, article 123305. ISSN: 0029-8018. doi: [10.1016/j.oceaneng.2025.123305](https://doi.org/10.1016/j.oceaneng.2025.123305). [ScienceDirect](https://www.sciencedirect.com/science/article/pii/S0029801825029889).
+>
+> Keywords: Underwater mobile sensors network; Passive acoustic monitoring; Distributed multi-AUV system.
+
 ## Notes
 
 - The package targets ROS 1 and expects a catkin workspace.
